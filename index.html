@@ -224,6 +224,8 @@ async function load(options = {}) {
   renderRetention(data.retention_weekly);
   renderActivation(data.activation_weekly);
   renderFunnel($("paywall"), data.paywall_funnel);
+  // 로그인 화면이 이 값을 보고 대시보드로 넘어간다 — 빠뜨리면 조용히 실패로 읽힌다.
+  return true;
 }
 
 function renderTiles(t) {
