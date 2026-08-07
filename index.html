@@ -36,6 +36,8 @@
   .muted { color: var(--secondary-ink); font-size: 13px; }
   .error { color: var(--error); font-size: 14px; margin-top: 8px; }
   .empty { color: var(--secondary-ink); font-size: 14px; padding: 12px 0; }
+  /* 숫자가 어디서 왔는지 카드 바로 밑에서 밝힌다 — 출처를 모르면 못 믿는다 */
+  .hint { margin-top: 6px; font-size: 12px; line-height: 1.5; }
   input {
     width: 100%; padding: 12px; font-size: 16px; border: 1px solid var(--line);
     border-radius: 10px; background: var(--canvas); color: var(--ink); margin-top: 8px;
@@ -97,16 +99,20 @@
   </div>
   <h2>지금까지</h2>
   <div class="tiles" id="tiles"></div>
+  <h2>활성화 퍼널 (사람 수)</h2>
+  <div class="card" id="milestones"></div>
+  <div class="muted hint">앱이 보낸 기록이 아니라 남은 흔적으로 셉니다 — 쪽지가 있으면 쪽지를 쓴 것. 계측이 멈춰도 이 숫자는 멈추지 않습니다.</div>
   <h2>최근 60일 DAU</h2>
   <div class="card" id="dau"></div>
-  <h2>온보딩 퍼널 (전체 기간, 사람 수)</h2>
-  <div class="card" id="funnel"></div>
   <h2>주간 코호트 리텐션 (%)</h2>
   <div class="card scroll" id="retention"></div>
   <h2>주간 활성화율</h2>
   <div class="card scroll" id="activation"></div>
   <h2>결제 퍼널</h2>
   <div class="card" id="paywall"></div>
+  <h2>화면 단계 (앱 계측)</h2>
+  <div class="card" id="funnel"></div>
+  <div class="muted hint">화면을 봤는지·권한 요청을 미뤘는지처럼 흔적이 안 남는 단계입니다. 2026-07-31부터 수집이 멈춰 있었고(고침), 새 빌드가 나가야 다시 쌓입니다.</div>
 </section>
 
 <script>
@@ -116,6 +122,10 @@
 const FUNCTION_URL = "https://ebbuloiyjemmyhxazmxh.supabase.co/functions/v1/admin-dashboard";
 const $ = (id) => document.getElementById(id);
 const KOREAN_STEP_NAMES = {
+  // 흔적 기반 이정표(analytics.milestone_funnel)
+  signed_up: "가입", profile_created: "프로필 생성", partner_connected: "파트너 연결",
+  first_event: "첫 일정", push_enabled: "알림 허용", first_note: "첫 쪽지", first_idea: "첫 버킷",
+  // 앱 계측 단계(analytics.funnel_overall)
   onboarding_started: "온보딩 시작", timezone_confirmed: "시간대 확인",
   partner_setup_started: "파트너 설정 시작", partner_invite_sent: "초대 보냄",
   first_event_source_selected: "첫 일정 소스 선택", first_event_created_manually: "첫 일정 직접 생성",
@@ -219,6 +229,7 @@ async function load(options = {}) {
   lastData = data;
   $("generated-at").textContent = "기준 " + new Date(data.generated_at).toLocaleString("ko-KR");
   renderTiles(data.usage_totals);
+  renderFunnel($("milestones"), data.milestone_funnel);
   renderDau(data.actives_daily);
   renderFunnel($("funnel"), data.funnel_overall);
   renderRetention(data.retention_weekly);
