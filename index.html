@@ -46,7 +46,6 @@
   }
   button.quiet { background: transparent; color: var(--secondary-ink); font-weight: 400; font-size: 13px; }
   button:disabled { opacity: 0.5; }
-  .hint { min-height: 16px; margin-top: 6px; }
   .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
   .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
   .tile b {
@@ -84,18 +83,9 @@
 <h1>나루 어드민</h1>
 
 <section id="login" class="card">
-  <div id="step-email">
-    <div class="muted">관리자 계정 이메일로 6자리 코드를 받아 로그인합니다.</div>
-    <input id="email" type="email" placeholder="이메일" autocomplete="email">
-    <button id="send-otp">코드 받기</button>
-  </div>
-  <div id="step-otp" style="display:none">
-    <div class="muted">메일로 온 6자리 코드를 입력하세요.</div>
-    <input id="otp" inputmode="numeric" maxlength="6" placeholder="000000">
-    <button id="verify-otp">로그인</button>
-    <button id="resend-otp" class="quiet">코드 다시 받기</button>
-    <div id="resend-hint" class="muted hint"></div>
-  </div>
+  <div class="muted">공유 비밀번호를 입력하면 들어갑니다.</div>
+  <input id="password" type="password" placeholder="비밀번호" autocomplete="current-password">
+  <button id="enter">들어가기</button>
   <div id="login-error" class="error"></div>
 </section>
 
@@ -119,11 +109,11 @@
   <div class="card" id="paywall"></div>
 </section>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="config.js"></script>
 <script>
-const cfg = window.NARU_ADMIN_CONFIG;
-const sb = supabase.createClient(cfg.url, cfg.anonKey);
+// 집계를 읽어 주는 유일한 통로. 비밀번호 확인도 이 함수 안(서버)에서 한다 —
+// 이 파일은 공개돼 있어서 여기 둔 검사는 소스로 다 보이고 아무것도 막지 못한다.
+// 그래서 페이지에는 비밀이 없고, 주소만 있다.
+const FUNCTION_URL = "https://ebbuloiyjemmyhxazmxh.supabase.co/functions/v1/admin-dashboard";
 const $ = (id) => document.getElementById(id);
 const KOREAN_STEP_NAMES = {
   onboarding_started: "온보딩 시작", timezone_confirmed: "시간대 확인",
@@ -153,71 +143,79 @@ function show(section) {
   $("dashboard").style.display = section === "dashboard" ? "block" : "none";
 }
 
+// 새로고침 때마다 다시 치지 않게 탭 세션에만 둔다 — 탭을 닫으면 사라지므로
+// 남의 기기에서 잠깐 열어봐도 비밀번호가 남지 않는다.
+const PASSWORD_KEY = "naru.admin.password";
+let password = sessionStorage.getItem(PASSWORD_KEY) ?? "";
+
 async function init() {
-  const { data: { session } } = await sb.auth.getSession();
-  if (session) { show("dashboard"); await load(); } else { show("login"); }
+  if (password) { show("dashboard"); await load(); } else { show("login"); }
 }
 
-$("send-otp").onclick = () => sendOtp(false);
-$("resend-otp").onclick = () => sendOtp(true);
-async function sendOtp(isResend) {
+$("enter").onclick = enter;
+// 비밀번호 한 칸짜리 폼에서 엔터가 안 먹으면 폰에서 특히 답답하다.
+$("password").onkeydown = (event) => { if (event.key === "Enter") enter(); };
+async function enter() {
   $("login-error").textContent = "";
-  $("resend-hint").textContent = "";
-  const email = $("email").value.trim();
-  if (!email) { $("login-error").textContent = "이메일을 입력하세요."; return; }
-  const btn = isResend ? $("resend-otp") : $("send-otp");
-  const originalLabel = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = "보내는 중…";
-  // 어드민 페이지에서 새 계정이 만들어지면 안 된다.
-  const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
-  btn.disabled = false;
-  btn.textContent = originalLabel;
-  if (error) { $("login-error").textContent = "코드 전송 실패: " + error.message; return; }
-  if (isResend) {
-    $("resend-hint").textContent = "코드를 다시 보냈어요.";
-  } else {
-    $("step-email").style.display = "none";
-    $("step-otp").style.display = "block";
-  }
-}
-
-$("verify-otp").onclick = async () => {
-  $("login-error").textContent = "";
-  const btn = $("verify-otp");
+  const value = $("password").value.trim();
+  if (!value) { $("login-error").textContent = "비밀번호를 입력하세요."; return; }
+  const btn = $("enter");
   const originalLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = "확인 중…";
-  const { error } = await sb.auth.verifyOtp({
-    email: $("email").value.trim(), token: $("otp").value.trim(), type: "email",
-  });
+  password = value;
+  const ok = await load({ fromLogin: true });
   btn.disabled = false;
   btn.textContent = originalLabel;
-  if (error) { $("login-error").textContent = "코드가 맞지 않아요: " + error.message; return; }
+  if (!ok) { password = ""; return; }
+  sessionStorage.setItem(PASSWORD_KEY, value);
+  $("password").value = "";
   show("dashboard");
-  await load();
-};
+}
 
-$("signout").onclick = async () => {
-  await sb.auth.signOut();
+$("signout").onclick = () => {
+  password = "";
+  sessionStorage.removeItem(PASSWORD_KEY);
   lastData = null;
-  // 다음 로그인은 이메일 단계부터 — OTP 화면이 남아 있으면 재로그인이 막힌다.
-  $("step-email").style.display = "block";
-  $("step-otp").style.display = "none";
   show("login");
 };
-$("reload").onclick = load;
+$("reload").onclick = () => load();
 
-async function load() {
-  $("generated-at").textContent = "불러오는 중…";
-  const { data, error } = await sb.rpc("admin_dashboard_snapshot");
-  if (error) {
-    // 42501 = 관리자 명단에 없는 계정. 데이터는 서버가 지킨다.
-    $("generated-at").textContent = error.code === "42501"
-      ? "이 계정은 관리자가 아니에요."
-      : "불러오기 실패: " + error.message + " · 새로고침을 눌러 다시 시도하세요.";
-    return;
+async function load(options = {}) {
+  const fromLogin = options.fromLogin === true;
+  // 로그인 화면에서 부를 땐 대시보드가 아직 안 보이므로 그쪽에 쓰면 아무도 못 본다.
+  const fail = (message) => {
+    if (fromLogin) $("login-error").textContent = message;
+    else $("generated-at").textContent = message;
+    return false;
+  };
+  if (!fromLogin) $("generated-at").textContent = "불러오는 중…";
+
+  let response;
+  try {
+    response = await fetch(FUNCTION_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+  } catch {
+    return fail("서버에 닿지 못했어요. 잠시 뒤 다시 시도하세요.");
   }
+
+  if (response.status === 401) {
+    if (fromLogin) return fail("비밀번호가 맞지 않아요.");
+    // 저장해 둔 비밀번호가 그새 바뀐 경우다. 들고 있어봐야 계속 튕기니 버린다.
+    password = "";
+    sessionStorage.removeItem(PASSWORD_KEY);
+    show("login");
+    $("login-error").textContent = "비밀번호가 바뀌었어요. 다시 입력해 주세요.";
+    return false;
+  }
+  if (!response.ok) {
+    return fail("불러오기 실패 (" + response.status + ") · 새로고침을 눌러 다시 시도하세요.");
+  }
+
+  const data = await response.json();
   lastData = data;
   $("generated-at").textContent = "기준 " + new Date(data.generated_at).toLocaleString("ko-KR");
   renderTiles(data.usage_totals);
