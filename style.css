@@ -1,0 +1,130 @@
+  /* NaruTheme.swift의 자두 노을 팔레트. 앱과 같은 토큰을 CSS 변수로 복제한다 —
+     위젯이 팔레트를 인라인 복제하는 것과 같은 이유(타깃 독립성).
+     --ink-invert는 이 페이지에만 있는 파생 토큰 — 채도 높은 칠(리텐션 히트맵) 위에
+     얹는 글자색을 배경 밝기에 따라 골라 대비를 지키는 용도(dataviz: 칠 안 라벨은
+     칠의 밝기로 흰/잉크를 고른다). */
+  :root {
+    --canvas: #FEF7F4; --surface: #FFFFFF; --ink: #262230; --secondary-ink: #77707E;
+    --deep-water: #3F3159; --tide: #8E7FB8; --sunset: #EE8468; --sandbar: #F0D8B8;
+    --error: #8C2121; --line: rgba(0, 0, 0, 0.07); --subtle: rgba(0, 0, 0, 0.045);
+    --ink-invert: #FFFFFF;
+    /* 칠 면적이 없는 2px 선은 sandbar 원색이 라이트에서 안 보인다 — 차트 전용 진한 파생값. */
+    --series-idea: #A98A4F;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --canvas: #17131B; --surface: #242029; --ink: #F6F0F8; --secondary-ink: #B8B0BD;
+      --deep-water: #C9BAED; --tide: #B8A7E2; --sunset: #FF9B7D; --sandbar: #C9A978;
+      --error: #FF999E; --line: rgba(255, 255, 255, 0.12); --subtle: rgba(255, 255, 255, 0.08);
+      --ink-invert: #15111A;
+      --series-idea: #C9A978;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--canvas); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
+    padding: 16px; max-width: 720px; margin: 0 auto;
+  }
+  h1 { font-size: 20px; margin: 8px 0 16px; }
+  h2 { font-size: 15px; margin: 24px 0 8px; color: var(--secondary-ink); font-weight: 600; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; position: relative; }
+  .muted { color: var(--secondary-ink); font-size: 13px; }
+  .error { color: var(--error); font-size: 14px; margin-top: 8px; }
+  .empty { color: var(--secondary-ink); font-size: 14px; padding: 12px 0; }
+  .banner {
+    background: color-mix(in srgb, var(--error) 12%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--error) 40%, transparent);
+    color: var(--ink); border-radius: 14px; padding: 12px 14px; font-size: 14px; margin-bottom: 12px;
+  }
+  .banner b { color: var(--error); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 4px; margin-right: 6px; vertical-align: 1px; }
+  .dot.ok { background: var(--tide); }
+  .dot.stale { background: var(--error); }
+  .status-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .status-row:last-child { border-bottom: 0; }
+  /* 숫자가 어디서 왔는지 카드 바로 밑에서 밝힌다 — 출처를 모르면 못 믿는다 */
+  .hint { margin-top: 6px; font-size: 12px; line-height: 1.5; }
+  input {
+    width: 100%; padding: 12px; font-size: 16px; border: 1px solid var(--line);
+    border-radius: 10px; background: var(--canvas); color: var(--ink); margin-top: 8px;
+  }
+  button {
+    width: 100%; padding: 12px; font-size: 16px; border: 0; border-radius: 10px;
+    background: var(--sunset); color: #fff; font-weight: 600; margin-top: 12px; cursor: pointer;
+  }
+  button.quiet { background: transparent; color: var(--secondary-ink); font-weight: 400; font-size: 13px; }
+  button:disabled { opacity: 0.5; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+  .tile b {
+    display: block; font-size: 22px; margin-top: 2px; font-weight: 600;
+    font-variant-numeric: proportional-nums; /* 큰 숫자는 고정폭이면 헐거워 보인다 */
+  }
+  .bar-row { display: grid; grid-template-columns: 170px 1fr 76px; gap: 8px; align-items: center; font-size: 13px; margin: 8px 0; }
+  .bar-row:focus-visible { outline: 2px solid var(--tide); outline-offset: 2px; border-radius: 6px; }
+  .bar-track { background: var(--subtle); border-radius: 4px; height: 14px; overflow: hidden; }
+  /* 데이터 끝(오른쪽)만 4px 둥글리고 기준선(왼쪽)은 각지게 — 값이 자라나는 방향만 부드럽다 */
+  .bar-fill { background: var(--tide); height: 100%; border-radius: 0 4px 4px 0; transition: background-color .15s; }
+  .bar-row:hover .bar-fill, .bar-row:focus-visible .bar-fill { background: var(--deep-water); }
+  table {
+    border-collapse: collapse; font-size: 13px; width: 100%;
+    font-variant-numeric: tabular-nums; /* 표 안에서는 숫자 자릿수가 맞아야 세로로 읽힌다 */
+  }
+  th, td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  .scroll { overflow-x: auto; }
+  .retention-key { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 12px; }
+  .retention-key .ramp {
+    width: 88px; height: 8px; border-radius: 4px;
+    background: linear-gradient(to right, transparent, var(--tide));
+  }
+  .chart-wrap { position: relative; }
+  .chart-tooltip {
+    position: absolute; pointer-events: none; background: var(--deep-water); color: var(--ink-invert);
+    font-size: 12px; padding: 5px 8px; border-radius: 8px; white-space: nowrap;
+    transform: translate(-50%, -100%); opacity: 0; transition: opacity .1s; z-index: 2;
+  }
+  #dashboard, #login { display: none; }
+
+  /* 탭 바는 화면 위에 상주한다 — 스크롤 깊은 추세 탭에서도 이동이 한 손가락. */
+  .tabbar {
+    position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 4px;
+    background: var(--canvas); padding: 8px 0; margin: 0 0 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .tab {
+    width: auto; margin: 0; padding: 8px 14px; font-size: 14px; font-weight: 600;
+    background: transparent; color: var(--secondary-ink); border-radius: 10px;
+  }
+  .tab[aria-selected="true"] { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+  .tab-meta { margin-left: auto; display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--secondary-ink); }
+  .tab-meta .quiet { width: auto; margin: 0; padding: 6px 8px; }
+  /* 좁은 화면에서 탭 글자가 세로로 꺾이면 탭인지 알아볼 수 없다 — 라벨은 절대
+     줄바꿈하지 않고, 기준 시각·버튼 묶음만 아랫줄로 내린다. */
+  .tab, .tab-meta .quiet { white-space: nowrap; }
+  #generated-at { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 480px) {
+    .tabbar { flex-wrap: wrap; }
+    .tab-meta { width: 100%; justify-content: flex-end; }
+  }
+
+  /* 스켈레톤: 로딩을 스피너가 아니라 곧 올 모양으로 보여준다. */
+  .skeleton { position: relative; overflow: hidden; background: var(--subtle); border-radius: 10px; min-height: 72px; }
+  .skeleton::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, var(--line), transparent);
+    animation: shimmer 1.2s infinite;
+  }
+  @keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+  @media (prefers-reduced-motion: reduce) { .skeleton::after { animation: none; } }
+
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+  .badge.active { background: color-mix(in srgb, var(--tide) 18%, transparent); color: var(--deep-water); }
+  .badge.dormant { background: color-mix(in srgb, var(--sandbar) 45%, transparent); color: var(--ink); }
+  .badge.churned { background: color-mix(in srgb, var(--error) 14%, transparent); color: var(--error); }
+  .badge.plus { background: color-mix(in srgb, var(--sunset) 16%, transparent); color: var(--sunset); }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable[aria-sort="descending"]::after { content: " ↓"; color: var(--secondary-ink); }
+  th.sortable[aria-sort="ascending"]::after { content: " ↑"; color: var(--secondary-ink); }
+  details.unpaired summary { cursor: pointer; font-size: 13px; color: var(--secondary-ink); }
