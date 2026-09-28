@@ -13,13 +13,17 @@ const KOREAN_STEP_NAMES = {
   dual_timezone_event_viewed: "두 시간대 일정 봄 ①", notification_value_screen_viewed: "알림 가치 화면",
   notification_permission_requested: "알림 권한 요청", notification_permission_granted: "알림 허용",
   notification_permission_denied: "알림 거부", notification_ask_deferred: "알림 나중에",
-  first_notification_configured: "첫 알림 설정 ②", calendar_value_screen_viewed: "캘린더 가치 화면",
+  first_notification_configured: "첫 알림 설정 ②",
   calendar_permission_requested: "캘린더 권한 요청", calendar_permission_granted: "캘린더 허용",
-  calendar_permission_denied: "캘린더 거부", onboarding_completed: "온보딩 완료",
+  calendar_permission_denied: "캘린더 거부", onboarding_completed: "커플 연결",
   home_viewed_after_onboarding: "홈 도달", first_note_created: "첫 쪽지", first_idea_saved: "첫 버킷",
   paywall_viewed: "페이월 봄", trial_ended_paywall_viewed: "체험 종료 페이월",
   paywall_tier_selected: "티어 선택", purchase_started: "결제 시작",
   purchase_succeeded: "결제 성공", purchase_cancelled: "결제 취소", purchase_failed: "결제 실패",
+  // funnel_steps 밖의 이벤트(event_counts_14d로만 온다)
+  partner_invite_share_completed: "초대 공유 완료", partner_invite_share_cancelled: "초대 공유 취소",
+  accept_invite_sheet_opened: "받은 코드 입력 열기",
+  widget_nudge_viewed: "위젯 권유 봄", widget_nudge_opened: "위젯 안내 열기", widget_nudge_dismissed: "위젯 권유 닫기",
 };
 
 // 화면이 켜져 있는 동안 OS가 라이트/다크를 바꾸면 CSS 변수는 즉시 따라가지만,
@@ -35,7 +39,7 @@ function show(section) {
 }
 
 // 탭은 URL 해시가 원본이다 — 새로고침·뒤로가기에도 보던 탭이 유지된다.
-const TABS = ["summary", "couples", "trends", "revenue"];
+const TABS = ["summary", "couples", "trends", "revenue", "ops"];
 function selectTab(name) {
   const tab = TABS.includes(name) ? name : "summary";
   for (const t of TABS) {
@@ -47,9 +51,11 @@ function selectTab(name) {
 document.querySelectorAll(".tab").forEach((b) => b.onclick = () => selectTab(b.dataset.tab));
 window.addEventListener("hashchange", () => selectTab(location.hash.slice(1)));
 
-const SECTION_IDS = ["summary-tiles", "summary-spark", "summary-membership", "pipeline-detail",
-  "couple-table", "unpaired", "dau", "feature-usage", "retention", "activation",
-  "milestones", "funnel", "membership-dist", "membership-table", "paywall"];
+const SECTION_IDS = ["attention", "summary-tiles", "summary-spark", "summary-membership",
+  "couple-table", "unpaired", "countries", "signups", "deletions", "dau", "feature-usage",
+  "retention", "activation", "milestones", "funnel", "nudges",
+  "payment-detail", "membership-dist", "membership-table", "paywall",
+  "pipeline-detail", "cron", "http", "gcal", "push", "holidays", "storage", "versions", "feedback"];
 
 function showSkeletons() {
   for (const id of SECTION_IDS) {
@@ -67,6 +73,31 @@ function relTime(iso) {
   if (days === 1) return "어제";
   return `${days}일 전`;
 }
+// 몇 분·몇 시간 단위가 판단인 곳(cron·동기화)용. 날짜 단위로 뭉개면 "오늘"이 6시간 전과 5분 전을 가린다.
+function relTimeFine(iso) {
+  if (!iso) return "기록 없음";
+  const minutes = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (minutes < 1) return "방금";
+  if (minutes < 60) return `${minutes}분 전`;
+  if (minutes < 48 * 60) return `${Math.floor(minutes / 60)}시간 전`;
+  return `${Math.floor(minutes / 1440)}일 전`;
+}
+const fmtBytes = (n) => {
+  const v = Number(n ?? 0);
+  if (v >= 1e9) return `${(v / 1e9).toFixed(2)}GB`;
+  if (v >= 1e6) return `${(v / 1e6).toFixed(1)}MB`;
+  if (v >= 1e3) return `${Math.round(v / 1e3)}KB`;
+  return `${v}B`;
+};
+const countryName = (() => {
+  let names = null;
+  try { names = new Intl.DisplayNames(["ko"], { type: "region" }); } catch { /* 구형 브라우저 */ }
+  return (code) => { try { return names?.of(code) ?? code; } catch { return code; } };
+})();
+// 한 줄짜리 상태 행. 모든 운영 카드가 같은 모양이어야 훑어볼 때 눈이 안 흔들린다.
+const statusRow = (label, value, level) =>
+  `<div class="status-row"><span>${level ? `<span class="dot ${level}"></span>` : ""}${label}</span>` +
+  `<span class="muted">${value}</span></div>`;
 // 옛 함수가 아직 배포된 창: 그 섹션만 정직하게 비우고 나머지는 그린다.
 function missingKey(el) {
   el.innerHTML = `<div class="empty">서버 업데이트가 필요해요 — migration이 아직 배포되지 않았습니다.</div>`;
@@ -160,7 +191,14 @@ async function load(options = {}) {
   lastData = data;
   $("generated-at").textContent = "기준 " + new Date(data.generated_at).toLocaleString("ko-KR");
   renderSummary(data);
+  renderAttention(data);
   renderPipeline(data.pipeline_health);
+  renderPayment(data.payment_health, data.ops_health);
+  renderOps(data);
+  renderSignups(data.signups_daily);
+  renderDeletions(data.deletions_recent);
+  renderCountries(data.users_by_country);
+  renderNudges(data.event_counts_14d);
   renderCouples(data);
   renderRevenue(data);
   renderDau(data.actives_daily);
@@ -256,31 +294,362 @@ function renderFeatureUsage(rows) {
     <div style="margin-top:8px">${legend}</div>`;
 }
 
+// 앱이 보내는 계측만 신선도로 판정한다. 결제 원천은 결제가 없는 날이 정상이라, 같은 기준을
+// 대면 "도착한 적 없음 — 새 빌드가 배포돼야"라는 틀린 경보가 된다(평생권 실구매 0건일 때 실제로 떴다).
 const PIPELINE_NAMES = {
   user_active_days: "하트비트", onboarding_events: "온보딩 퍼널",
   widget_installs: "위젯 설치", widget_taps: "위젯 탭",
 };
+const PAYMENT_SOURCE_NAMES = {
+  subscriber_memberships: "구독 기록", lifetime_grants_purchased: "평생권 실구매",
+};
 const STALE_DAYS = 3;
+// 표시용 일수(relTime)는 내림이라 3.x일이 "3일 전"으로 보인다 — 그 값으로 임계를
+// 판정하면 실제 4일째까지 조용하다. 판정은 ms로, 표시만 날짜로 따로 한다.
+const pipelineStale = (r) =>
+  (r.last_arrival ? Date.now() - new Date(r.last_arrival).getTime() : Infinity) > STALE_DAYS * 86400000;
+const instrumentationRows = (rows) => (rows ?? []).filter((r) => r.source in PIPELINE_NAMES);
 
 function renderPipeline(rows) {
-  if (!rows) { missingKey($("pipeline-detail")); $("pipeline-banner").innerHTML = ""; return; }
-  // 표시용 일수(relTime)는 내림이라 3.x일이 "3일 전"으로 보인다 — 그 값으로 임계를
-  // 판정하면 실제 4일째까지 조용하다. 판정은 ms로, 표시만 날짜로 따로 한다.
-  const staleness = (r) => r.last_arrival
-    ? (Date.now() - new Date(r.last_arrival).getTime()) : Infinity;
-  const stale = rows.filter((r) => staleness(r) > STALE_DAYS * 86400000);
-  // 죽은 수집은 조용히 넘어가지 않는다 — 이 배너가 이 개편의 존재 이유다.
-  $("pipeline-banner").innerHTML = stale.length
-    ? `<div class="banner"><b>수집 ${stale.length}개가 멈춰 있어요.</b> ` +
-      stale.map((r) => {
-        const name = PIPELINE_NAMES[r.source] ?? r.source;
-        return r.last_arrival ? `${name}: ${relTime(r.last_arrival)}이 마지막` : `${name}: 도착한 적 없음`;
-      }).join(" · ") + " — 새 빌드가 배포돼야 다시 쌓입니다.</div>"
-    : `<div class="status-row"><span><span class="dot ok"></span>수집 정상 — 모든 원천이 3일 안에 도착</span></div>`;
-  $("pipeline-detail").innerHTML = rows.map((r) => {
-    const isStale = staleness(r) > STALE_DAYS * 86400000;
-    return `<div class="status-row"><span><span class="dot ${isStale ? "stale" : "ok"}"></span>${PIPELINE_NAMES[r.source] ?? r.source}</span>
-      <span class="muted" title="${r.last_arrival ?? ""}">마지막 ${relTime(r.last_arrival)} · 14일 ${fmtInt(r.recent_rows)}행</span></div>`;
+  if (!rows) { missingKey($("pipeline-detail")); return; }
+  $("pipeline-detail").innerHTML = instrumentationRows(rows).map((r) =>
+    statusRow(PIPELINE_NAMES[r.source], `<span title="${r.last_arrival ?? ""}">마지막 ${relTime(r.last_arrival)}</span> · 14일 ${fmtInt(r.recent_rows)}행`,
+      pipelineStale(r) ? "stale" : "ok")).join("");
+}
+
+// 결제가 새는지. 두 달간 0건이던 걸 아무도 못 알아챈 이유가 "뷰는 있는데 화면이
+// 없어서"였다 — 새면 요약의 "확인할 것" 맨 위에 뜬다.
+const PAYMENT_LABELS = [
+  ["paywall_viewed", "페이월 봄"],
+  ["purchase_started", "결제 시작"],
+  ["purchase_succeeded", "애플이 성공이라 함"],
+  ["purchase_failed", "결제 실패"],
+  ["subscriptions_recorded", "구독 기록됨"],
+  ["lifetime_recorded", "평생권 기록됨"],
+  // 심사·TestFlight 구매다. 위 기록 수에 포함돼 있으니 실매출을 볼 땐 이만큼 뺀다.
+  ["sandbox_recorded", "그중 샌드박스"],
+];
+
+function renderPayment(h, ops) {
+  // 뷰가 한 행을 내므로 객체다. 키가 없으면 migration이 아직이다.
+  if (!h || h.status === undefined) { missingKey($("payment-detail")); return; }
+  const dot = h.status === "LEAKING" ? "stale" : "ok";
+  const headline = h.status === "LEAKING" ? "결제가 새고 있어요"
+    : h.status === "no_purchases" ? "30일간 앱이 보고한 결제 성공 없음"
+    : "결제 정상 — 성공한 결제가 모두 서버에 남았어요";
+  // 샌드박스 기록이 성공 이벤트보다 많으면 음수가 된다 — "미기록"은 0 밑으로 내려가지 않는다.
+  const unrecorded = Math.max(Number(h.unrecorded ?? 0), 0);
+  const sources = (ops?.payment_sources ?? []).map((r) =>
+    statusRow(PAYMENT_SOURCE_NAMES[r.source] ?? r.source,
+      `<span title="${r.last_arrival ?? ""}">마지막 ${relTime(r.last_arrival)}</span> · 14일 ${fmtInt(r.recent_rows)}행`)).join("");
+  $("payment-detail").innerHTML =
+    statusRow(`<b>${headline}</b>`, `미기록 ${fmtInt(unrecorded)}건`, dot) +
+    PAYMENT_LABELS.map(([k, name]) => statusRow(name, fmtInt(h[k]))).join("") + sources;
+}
+
+// cron 식에서 "원래 몇 분마다 도는지"만 뽑는다. 이 페이지가 쓰는 세 모양(*/N분, M */H시, M H 매일)
+// 밖이면 null — 모르는 주기로 늦음을 판정하느니 판정하지 않는다.
+function cronIntervalMinutes(schedule) {
+  const [min, hour, dom, mon, dow] = String(schedule).trim().split(/\s+/);
+  if (dom !== "*" || mon !== "*" || dow !== "*") return null;
+  const everyMin = /^\*\/(\d+)$/.exec(min);
+  if (everyMin && hour === "*") return Number(everyMin[1]);
+  const everyHour = /^\*\/(\d+)$/.exec(hour);
+  if (/^\d+$/.test(min) && everyHour) return Number(everyHour[1]) * 60;
+  if (/^\d+$/.test(min) && /^\d+$/.test(hour)) return 1440;
+  return null;
+}
+// 주기의 두 배 + 10분을 넘기면 한 번 이상 건너뛴 것이다.
+function cronLate(job) {
+  if (!job.active) return false;
+  const every = cronIntervalMinutes(job.schedule);
+  if (!every) return false;
+  if (!job.last_run) return true;
+  return Date.now() - new Date(job.last_run).getTime() > (every * 2 + 10) * 60000;
+}
+const CRON_NAMES = {
+  "send-upcoming-event-push": "상대 일정 30분 전 푸시",
+  "send-invite-reminder-push": "초대 코드 만료 알림",
+  "renew-naru-google-calendar-watches": "Google 캘린더 구독 갱신",
+  "sync-naru-holidays": "공휴일 동기화",
+  "account-migration-ticket-cleanup": "계정 이전 티켓 정리",
+  "purge-stale-testflight-applications": "TestFlight 신청 정리",
+  "cron-run-log-cleanup": "cron 기록 정리",
+  "hme-auto-recovery": "HME 계정 자동 복구",
+};
+
+// 결정은 여기 한 곳에서 한다 — 카드마다 경고를 따로 띄우면 어디가 급한지 순서가 사라진다.
+// bad: 지금 사용자·돈이 새는 중. warn: 며칠 안에 봐야 함. info: 알아두면 좋음.
+function buildAttention(data) {
+  const items = [];
+  const add = (level, title, detail, tab) => items.push({ level, title, detail, tab });
+  const ops = data.ops_health;
+
+  const pay = data.payment_health;
+  if (pay?.status === "LEAKING") {
+    add("bad", `결제 ${fmtInt(pay.unrecorded)}건이 서버에 안 남았어요`,
+      `애플은 성공이라는데(${fmtInt(pay.purchase_succeeded)}건) 권한 행은 ` +
+      `${fmtInt(Number(pay.subscriptions_recorded) + Number(pay.lifetime_recorded))}건 — verify-plus-purchase 로그를 보세요.`, "revenue");
+  }
+  const stale = instrumentationRows(data.pipeline_health).filter(pipelineStale);
+  if (stale.length) {
+    add("bad", `계측 ${stale.length}개가 멈춰 있어요`,
+      stale.map((r) => `${PIPELINE_NAMES[r.source]}: ${r.last_arrival ? `${relTime(r.last_arrival)}이 마지막` : "도착한 적 없음"}`).join(" · ") +
+      " — 최근 빌드에서 수집 호출이 깨졌는지(RLS·upsert) 보세요.", "ops");
+  }
+  if (ops) {
+    const failing = ops.cron.filter((j) => j.active && Number(j.failures_24h) > 0);
+    const late = ops.cron.filter(cronLate);
+    if (failing.length) {
+      add("bad", `예약 작업 ${failing.length}개가 24시간 안에 실패했어요`,
+        failing.map((j) => `${CRON_NAMES[j.jobname] ?? j.jobname} ${fmtInt(j.failures_24h)}회`).join(" · "), "ops");
+    }
+    if (late.length) {
+      add("bad", `예약 작업 ${late.length}개가 제때 안 돌았어요`,
+        late.map((j) => `${CRON_NAMES[j.jobname] ?? j.jobname}: 마지막 ${relTimeFine(j.last_run)}`).join(" · "), "ops");
+    }
+    if (Number(ops.http?.failed) > 0) {
+      add("warn", `엣지 함수 호출 ${fmtInt(ops.http.failed)}건이 오류로 답했어요 (최근 6시간)`,
+        "시크릿 불일치(401)나 함수 에러일 수 있어요 — net._http_response에서 본문을 보세요.", "ops");
+    }
+    const g = ops.google_calendar;
+    if (g && (Number(g.reauth_failing) > 0 || Number(g.with_error) > 0)) {
+      add("warn", "Google 캘린더 동기화 오류가 있어요",
+        `재인증 실패 ${fmtInt(g.reauth_failing)}명 · 마지막 오류 남은 연결 ${fmtInt(g.with_error)}개`, "ops");
+    }
+    const DB_LIMIT = 500e6;
+    if (Number(ops.db_size_bytes) > DB_LIMIT * 0.7) {
+      add("warn", `DB가 ${fmtBytes(ops.db_size_bytes)}예요 — Free 한도 500MB의 70% 넘음`,
+        "cron.job_run_details·net._http_response처럼 스스로 안 비는 테이블부터 보세요.", "ops");
+    }
+  }
+  const uncovered = data.uncovered_holiday_countries ?? [];
+  if (uncovered.length) {
+    const users = uncovered.reduce((s, r) => s + Number(r.users), 0);
+    add("warn", `공휴일이 비어 보이는 사용자 ${fmtInt(users)}명`,
+      uncovered.map((r) => `${countryName(r.country_code)}(${r.country_code}) ${r.users}명`).join(" · ") +
+      " — sync-holidays의 CALENDAR_SLUGS에 나라를 더하세요.", "ops");
+  }
+  const days = data.signups_daily ?? [];
+  if (days.length) {
+    const total = (k, from, to) => days.slice(from, to).reduce((s, r) => s + Number(r[k]), 0);
+    const signups = total("signups", -7), deletions = total("deletions", -7);
+    const before = total("deletions", -14, -7);
+    // 소수일 땐 비율이 요동친다 — 절대 수도 같이 넘어야 신호로 본다. 가입 대비 비율과
+    // 직전 주 대비 급증, 둘 중 하나면 본다(가입이 같이 몰리면 비율만으론 묻힌다).
+    if (deletions >= 5 && (deletions >= signups * 0.1 || deletions >= before * 3)) {
+      add("warn", `최근 7일 탈퇴 ${fmtInt(deletions)}명 — 직전 7일 ${fmtInt(before)}명, 같은 기간 가입의 ${Math.round(100 * deletions / Math.max(signups, 1))}%`,
+        "추세 탭의 최근 탈퇴에서 얼마나 머물렀고 어디서 멈췄는지 보세요.", "trends");
+    }
+  }
+  const fresh = (data.feedback_recent ?? []).filter((f) =>
+    Date.now() - new Date(f.created_at).getTime() < 7 * 86400000);
+  if (fresh.length) add("info", `새 피드백 ${fresh.length}건 (7일)`, esc(String(fresh[0].message).slice(0, 80)), "ops");
+
+  const trialsEnding = (data.membership_rows ?? []).filter((m) => {
+    const left = m.expires_at ? new Date(m.expires_at).getTime() - Date.now() : -1;
+    return m.state === "trial_active" && left > 0 && left < 7 * 86400000;
+  }).length;
+  if (trialsEnding) {
+    add("info", `7일 안에 체험이 끝나는 커플 ${fmtInt(trialsEnding)}쌍`,
+      "끝나는 순간 체험 종료 페이월이 뜹니다 — 수익 탭 결제 퍼널에서 전환을 보세요.", "revenue");
+  }
+  const order = { bad: 0, warn: 1, info: 2 };
+  return items.sort((a, b) => order[a.level] - order[b.level]);
+}
+
+function renderAttention(data) {
+  const items = buildAttention(data);
+  // 운영 탭 배지는 운영 탭에서 풀 일만 센다 — 다른 탭 경고까지 세면 들어가도 못 찾는다.
+  const urgent = items.filter((i) => i.level !== "info" && i.tab === "ops").length;
+  const badge = $("ops-count");
+  badge.hidden = !urgent;
+  badge.textContent = urgent ? String(urgent) : "";
+  $("attention").innerHTML = items.length
+    ? items.map((i) => `<a class="attention ${i.level}" href="#${i.tab}">
+        <span class="dot ${i.level}"></span>
+        <span><b>${i.title}</b><span class="muted">${i.detail}</span></span></a>`).join("")
+    : statusRow("<b>모두 정상</b> — 결제·계측·예약 작업·동기화에 볼 것이 없어요", "", "ok");
+}
+
+function renderOps(data) {
+  const ops = data.ops_health;
+  const opsIds = ["cron", "http", "gcal", "push", "storage"];
+  if (!ops) { opsIds.forEach((id) => missingKey($(id))); }
+  else {
+    $("cron").innerHTML = ops.cron.map((j) => {
+      const level = !j.active ? "" : (Number(j.failures_24h) > 0 || cronLate(j)) ? "stale" : "ok";
+      const state = !j.active ? "꺼져 있음"
+        : `마지막 <span title="${j.last_run ?? ""}">${relTimeFine(j.last_run)}</span> · 24시간 ${fmtInt(j.runs_24h)}회` +
+          (Number(j.failures_24h) ? ` · <b class="bad-text">실패 ${fmtInt(j.failures_24h)}</b>` : "");
+      return statusRow(`${CRON_NAMES[j.jobname] ?? esc(j.jobname)} <span class="muted mono">${esc(j.schedule)}</span>`, state, level);
+    }).join("");
+
+    const h = ops.http ?? {};
+    $("http").innerHTML =
+      statusRow("2xx 응답", fmtInt(h.ok), "ok") +
+      statusRow("오류 응답(3xx 이상)", fmtInt(h.failed), Number(h.failed) ? "stale" : "ok") +
+      statusRow("응답 못 받음(타임아웃)", fmtInt(h.timeouts), Number(h.timeouts) ? "warn" : "ok") +
+      (h.last_failure ? statusRow("마지막 이상", `<span title="${h.last_failure}">${relTimeFine(h.last_failure)}</span>`) : "") +
+      `<div class="muted hint">타임아웃은 pg_net이 기다림을 끊은 것이라 함수는 끝까지 돌았을 수 있어요. 대신 결과(401 등)가 안 보입니다 — 0109가 공휴일 cron에서 겪은 일.</div>`;
+
+    const g = ops.google_calendar ?? {};
+    $("gcal").innerHTML =
+      statusRow("연결한 사람", fmtInt(g.connections)) +
+      statusRow("마지막 동기화", `<span title="${g.last_sync ?? ""}">${relTimeFine(g.last_sync)}</span>`) +
+      statusRow("재인증 실패 중", fmtInt(g.reauth_failing), Number(g.reauth_failing) ? "warn" : "ok") +
+      statusRow("마지막 오류가 남은 연결", fmtInt(g.with_error), Number(g.with_error) ? "warn" : "ok") +
+      statusRow("2일 넘게 동기화 없음", fmtInt(g.stale_2d)) +
+      statusRow("변경 구독(watch)", `${fmtInt(g.watches)}개 · 만료된 것 ${fmtInt(g.watches_expired)}개`,
+        Number(g.watches_expired) ? "warn" : "ok");
+
+    const p = ops.push ?? {};
+    $("push").innerHTML =
+      statusRow("운영 토큰", `${fmtInt(p.production_tokens)}개 · ${fmtInt(p.production_users)}명`) +
+      statusRow("샌드박스 토큰(개발·TestFlight 빌드)", fmtInt(p.sandbox_tokens)) +
+      statusRow("마지막 등록", `<span title="${p.last_registered ?? ""}">${relTimeFine(p.last_registered)}</span>`) +
+      statusRow("열려 있는 초대 코드", fmtInt(ops.open_invites));
+
+    // Free 플랜 기준(0110). 플랜을 올리면 이 두 숫자만 바꾼다.
+    const DB_LIMIT = 500e6, STORAGE_LIMIT = 1e9;
+    const storageBytes = (ops.storage ?? []).reduce((s, b) => s + Number(b.bytes), 0);
+    const meter = (label, used, limit) => {
+      const pct = Math.min(100, 100 * used / limit);
+      return `<div class="bar-row" tabindex="0" aria-label="${label}: ${fmtBytes(used)} / ${fmtBytes(limit)}">
+        <span>${label}</span>
+        <div class="bar-track"><div class="bar-fill${pct > 70 ? " hot" : ""}" style="width:${pct.toFixed(1)}%"></div></div>
+        <span class="muted">${fmtBytes(used)} · ${pct.toFixed(0)}%</span></div>`;
+    };
+    $("storage").innerHTML = meter("DB (한도 500MB)", Number(ops.db_size_bytes), DB_LIMIT) +
+      meter("Storage (한도 1GB)", storageBytes, STORAGE_LIMIT) +
+      (ops.storage ?? []).map((b) => statusRow(`<span class="mono">${esc(b.bucket)}</span>`,
+        `${fmtInt(b.objects)}개 · ${fmtBytes(b.bytes)}`)).join("");
+  }
+
+  const uncovered = data.uncovered_holiday_countries;
+  if (!uncovered) missingKey($("holidays"));
+  else {
+    $("holidays").innerHTML = uncovered.length
+      ? statusRow("<b>공휴일이 하나도 없는 나라</b>", "sync-holidays의 CALENDAR_SLUGS에 추가", "warn") +
+        uncovered.map((r) => statusRow(`${countryName(r.country_code)} <span class="muted">${esc(r.country_code)}</span>`,
+          `${fmtInt(r.users)}명 · 연결 ${fmtInt(r.paired_users)}명`)).join("")
+      : statusRow("모든 사용자 나라에 공휴일이 채워져 있어요", "", "ok");
+  }
+
+  const versions = data.app_versions;
+  if (!versions) missingKey($("versions"));
+  else if (!versions.length) $("versions").innerHTML = `<div class="empty">최근 14일 온보딩 없음</div>`;
+  else {
+    // 버전 문자열 정렬 — "1.0.10"이 "1.0.9" 뒤로 가야 한다.
+    const cmp = (a, b) => b.app_version.localeCompare(a.app_version, undefined, { numeric: true });
+    const sorted = [...versions].sort(cmp);
+    const max = Math.max(...sorted.map((v) => Number(v.users)), 1);
+    $("versions").innerHTML = sorted.map((v, i) => `<div class="bar-row" tabindex="0" aria-label="${esc(v.app_version)}: ${v.users}명">
+        <span class="mono">${esc(v.app_version)}${i === 0 ? ` <span class="badge plus">최신</span>` : ""}</span>
+        <div class="bar-track"><div class="bar-fill" style="width:${(100 * v.users / max).toFixed(1)}%"></div></div>
+        <span class="muted" title="${v.last_seen}">${fmtInt(v.users)}명 · ${relTimeFine(v.last_seen)}</span></div>`).join("");
+  }
+
+  const feedback = data.feedback_recent;
+  if (!feedback) missingKey($("feedback"));
+  else {
+    $("feedback").innerHTML = feedback.length
+      ? feedback.map((f) => `<div class="feedback">
+          <div class="muted"><span title="${f.created_at}">${relTime(f.created_at)}</span> · ${esc(f.app_version ?? "")} · ${esc(f.locale ?? "")}
+            ${f.contact_email ? ` · <a href="mailto:${encodeURIComponent(f.contact_email)}">${esc(f.contact_email)}</a>` : ""}</div>
+          <div class="feedback-body">${esc(f.message)}</div></div>`).join("")
+      : `<div class="empty">받은 피드백이 없어요.</div>`;
+  }
+}
+
+// 가입은 위로, 탈퇴는 아래로 — 같은 날 둘을 나란히 두면 "가입이 몰려서 탈퇴도 는 것"이 모양으로 보인다.
+function renderSignups(rows) {
+  const el = $("signups");
+  if (!rows) { missingKey(el); return; }
+  if (!rows.length) { el.innerHTML = `<div class="empty">아직 데이터 없음</div>`; return; }
+  const w = 640, h = 200, padL = 34, padR = 8, padT = 10, padB = 24;
+  const up = Math.max(...rows.map((r) => Number(r.signups)), 1);
+  const down = Math.max(...rows.map((r) => Number(r.deletions)), 1);
+  const plotH = h - padT - padB;
+  // 기준선 위치를 두 최대값 비율로 나눈다 — 탈퇴가 적을 때 아래 칸이 빈 채로 절반을 먹지 않게.
+  const zero = padT + plotH * up / (up + down);
+  const scale = plotH / (up + down);
+  const band = (w - padL - padR) / rows.length;
+  const bw = Math.max(band - 2, 1);
+  const bars = rows.map((r, i) => {
+    const x = padL + i * band + (band - bw) / 2;
+    const s = Number(r.signups), d = Number(r.deletions);
+    return `<g><title>${fmtDauDate(r.day)} · 가입 ${s} · 탈퇴 ${d}</title>
+      <rect x="${x.toFixed(1)}" y="${(zero - s * scale).toFixed(1)}" width="${bw.toFixed(1)}" height="${(s * scale).toFixed(1)}" fill="var(--tide)" rx="1"/>
+      <rect x="${x.toFixed(1)}" y="${zero.toFixed(1)}" width="${bw.toFixed(1)}" height="${(d * scale).toFixed(1)}" fill="var(--error)" opacity="0.75" rx="1"/>
+      <rect x="${(padL + i * band).toFixed(1)}" y="${padT}" width="${band.toFixed(1)}" height="${plotH}" fill="transparent"/></g>`;
+  }).join("");
+  const fmt = (d) => new Date(d + "T00:00:00Z").toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" });
+  const ticks = [...new Set([0, Math.floor((rows.length - 1) / 2), rows.length - 1])].map((i) =>
+    `<text x="${(padL + i * band + band / 2).toFixed(1)}" y="${h - 6}" text-anchor="middle" fill="var(--secondary-ink)" font-size="11">${fmt(rows[i].day)}</text>`).join("");
+  const axis = `<line x1="${padL}" y1="${zero.toFixed(1)}" x2="${w - padR}" y2="${zero.toFixed(1)}" stroke="var(--secondary-ink)" stroke-width="1"/>
+    <text x="${padL - 8}" y="${(zero - up * scale).toFixed(1)}" text-anchor="end" dominant-baseline="hanging" fill="var(--secondary-ink)" font-size="11">${up}</text>
+    <text x="${padL - 8}" y="${(zero + down * scale).toFixed(1)}" text-anchor="end" dominant-baseline="auto" fill="var(--secondary-ink)" font-size="11">${down}</text>`;
+  const sum = (k, n) => rows.slice(-n).reduce((s, r) => s + Number(r[k]), 0);
+  el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;display:block" role="img"
+      aria-label="최근 60일 일별 가입(위)과 탈퇴(아래)">${axis}${bars}${ticks}</svg>
+    <div class="legend"><span><i style="background:var(--tide)"></i>가입</span><span><i style="background:var(--error);opacity:.75"></i>탈퇴</span>
+      <span class="muted">7일 가입 ${fmtInt(sum("signups", 7))} · 탈퇴 ${fmtInt(sum("deletions", 7))} · 30일 가입 ${fmtInt(sum("signups", 30))} · 탈퇴 ${fmtInt(sum("deletions", 30))}</span></div>`;
+}
+
+function renderDeletions(rows) {
+  const el = $("deletions");
+  if (!rows) { missingKey(el); return; }
+  if (!rows.length) { el.innerHTML = `<div class="empty">30일간 탈퇴 없음</div>`; return; }
+  // 머문 시간 구간 — "가입하자마자 지움"과 "써보고 지움"은 고칠 곳이 다르다.
+  const buckets = [["1시간 안", 1], ["하루 안", 24], ["일주일 안", 168], ["그 이상", Infinity]];
+  const counts = buckets.map(([label, max], i) => [label, rows.filter((r) =>
+    Number(r.hours_alive) < max && (i === 0 || Number(r.hours_alive) >= buckets[i - 1][1])).length]);
+  const steps = {};
+  for (const r of rows) {
+    const k = r.last_funnel_step ?? "(기록 없음)";
+    steps[k] = (steps[k] ?? 0) + 1;
+  }
+  const partnered = rows.filter((r) => r.had_partner).length;
+  const max = Math.max(...counts.map(([, v]) => v), 1);
+  el.innerHTML =
+    `<div class="muted" style="margin-bottom:4px">머문 시간 · 파트너와 연결됐던 사람 ${fmtInt(partnered)}/${fmtInt(rows.length)}</div>` +
+    counts.map(([label, v]) => `<div class="bar-row" tabindex="0" aria-label="${label}: ${v}명">
+      <span>${label}</span><div class="bar-track"><div class="bar-fill" style="width:${(100 * v / max).toFixed(1)}%"></div></div>
+      <span class="muted">${fmtInt(v)}</span></div>`).join("") +
+    `<div class="muted" style="margin:12px 0 4px">마지막으로 남긴 온보딩 단계</div>` +
+    Object.entries(steps).sort((a, b) => b[1] - a[1]).map(([k, v]) =>
+      statusRow(KOREAN_STEP_NAMES[k] ?? esc(k), `${fmtInt(v)}명`)).join("");
+}
+
+function renderCountries(rows) {
+  const el = $("countries");
+  if (!rows) { missingKey(el); return; }
+  if (!rows.length) { el.innerHTML = `<div class="empty">아직 데이터 없음</div>`; return; }
+  const max = Math.max(...rows.map((r) => Number(r.users)), 1);
+  // 연결된 사람을 진하게, 혼자인 사람을 옅게 한 막대에 쌓는다 — 나라별 "연결률"이 길이 비로 보인다.
+  const row = (r) => `<div class="bar-row" tabindex="0" aria-label="${countryName(r.country_code)}: ${r.users}명, 연결 ${r.paired_users}명">
+      <span>${countryName(r.country_code)} <span class="muted">${esc(r.country_code)}</span></span>
+      <div class="bar-track stacked"><div class="bar-fill" style="width:${(100 * r.paired_users / max).toFixed(1)}%"></div><div class="bar-fill light" style="width:${(100 * r.solo_users / max).toFixed(1)}%"></div></div>
+      <span class="muted">${fmtInt(r.users)} · 연결 ${Math.round(100 * r.paired_users / Math.max(r.users, 1))}%</span></div>`;
+  const top = rows.slice(0, 10), rest = rows.slice(10);
+  el.innerHTML = top.map(row).join("") +
+    (rest.length ? `<details class="unpaired"><summary>나머지 ${rest.length}개 나라</summary>${rest.map(row).join("")}</details>` : "") +
+    `<div class="legend"><span><i style="background:var(--tide)"></i>연결</span><span><i style="background:color-mix(in srgb, var(--tide) 35%, transparent)"></i>혼자</span></div>`;
+}
+
+const NUDGE_GROUPS = [
+  ["초대", ["partner_invite_sent", "partner_invite_share_completed", "partner_invite_share_cancelled", "accept_invite_sheet_opened"]],
+  ["위젯 권유", ["widget_nudge_viewed", "widget_nudge_opened", "widget_nudge_dismissed"]],
+];
+function renderNudges(rows) {
+  const el = $("nudges");
+  if (!rows) { missingKey(el); return; }
+  const byName = Object.fromEntries(rows.map((r) => [r.name, r]));
+  el.innerHTML = NUDGE_GROUPS.map(([title, names]) => {
+    const group = document.createElement("div");
+    renderFunnel(group, names.map((name) => ({ name, users: byName[name]?.users ?? 0 })));
+    return `<div class="muted" style="margin-top:4px">${title}</div>${group.innerHTML}`;
   }).join("");
 }
 
@@ -395,11 +764,21 @@ function renderSummary(data) {
   const couples = data.couple_activity;
   const activeCouples = couples?.filter((c) =>
     c.last_active_at && (Date.now() - new Date(c.last_active_at).getTime()) / 86400000 <= 14).length;
+  // 가입·탈퇴는 직전 7일과 나란히 — 숫자 하나로는 많은지 적은지 모른다.
+  const sd = data.signups_daily ?? [];
+  const sum = (k, from, to) => sd.slice(from, to).reduce((s, r) => s + Number(r[k]), 0);
+  const weekDelta = (k) => {
+    if (sd.length < 14) return "";
+    const before = sum(k, -14, -7);
+    return `<span class="muted delta">직전 7일 ${fmtInt(before)}</span>`;
+  };
   const tiles = [
-    ["오늘 DAU", fmtInt(todayDau)],
+    ["오늘 DAU <span class=\"muted\">(UTC)</span>", fmtInt(todayDau)],
     ["7일 활성 사용자", data.actives_7d != null ? fmtInt(data.actives_7d) : "—"],
-    ["연결 커플", fmtInt(data.usage_totals?.connected_couples)],
     ["활성 커플(14일)", couples ? `${fmtInt(activeCouples)} / ${fmtInt(couples.length)}` : "—"],
+    ["7일 가입", sd.length ? fmtInt(sum("signups", -7)) + weekDelta("signups") : "—"],
+    ["7일 탈퇴", sd.length ? fmtInt(sum("deletions", -7)) + weekDelta("deletions") : "—"],
+    ["전체 계정", fmtInt(data.usage_totals?.accounts)],
   ];
   $("summary-tiles").innerHTML = tiles.map(([label, v]) =>
     `<div class="tile"><span class="muted">${label}</span><b>${v}</b></div>`).join("");
@@ -408,10 +787,16 @@ function renderSummary(data) {
 
   const s = data.membership_summary;
   if (!s) { missingKey($("summary-membership")); return; }
+  // expiring_soon은 체험과 유료를 섞어 센다 — 둘은 할 일이 달라서 여기서 가른다.
+  const soon = (m) => m.expires_at && new Date(m.expires_at).getTime() - Date.now() < 7 * 86400000
+    && new Date(m.expires_at).getTime() > Date.now();
+  const rows = data.membership_rows ?? [];
+  const trialsSoon = rows.filter((m) => m.state === "trial_active" && soon(m)).length;
+  const paidSoon = rows.filter((m) => m.state === "subscribed" && soon(m)).length;
   $("summary-membership").innerHTML =
-    `<div style="font-size:15px">평생권 <b>${fmtInt(s.lifetime)}</b> · 트라이얼 <b>${fmtInt(s.trial_active)}</b> · ` +
-    `구독 <b>${fmtInt(s.subscribed)}</b> · 만료 임박(7일) <b>${fmtInt(s.expiring_soon)}</b></div>` +
-    (Number(s.trial_over) ? `<div class="muted" style="margin-top:4px">체험만 끝난 쌍 ${fmtInt(s.trial_over)}</div>` : "");
+    `<div style="font-size:15px">평생권 <b>${fmtInt(s.lifetime)}</b> · 체험 중 <b>${fmtInt(s.trial_active)}</b> · ` +
+    `구독 <b>${fmtInt(s.subscribed)}</b> · 체험 끝(무권한) <b>${fmtInt(s.trial_over)}</b></div>` +
+    `<div class="muted" style="margin-top:4px">7일 안에 끝남: 체험 ${fmtInt(trialsSoon)}쌍 · 구독 ${fmtInt(paidSoon)}쌍</div>`;
 }
 
 // 요약용 축약 차트 — 축·툴팁 없이 모양만. 자세한 건 추세 탭이 담당한다.

@@ -128,3 +128,43 @@
   th.sortable[aria-sort="descending"]::after { content: " ↓"; color: var(--secondary-ink); }
   th.sortable[aria-sort="ascending"]::after { content: " ↑"; color: var(--secondary-ink); }
   details.unpaired summary { cursor: pointer; font-size: 13px; color: var(--secondary-ink); }
+
+  /* 확인할 것: 급한 순서대로 한 줄씩. 누르면 근거가 있는 탭으로 간다. */
+  .dot.bad { background: var(--error); }
+  .dot.warn { background: var(--sunset); }
+  .dot.info { background: var(--tide); }
+  .attention {
+    display: flex; gap: 2px; align-items: baseline; padding: 10px 4px; font-size: 14px;
+    color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--line); border-radius: 6px;
+  }
+  .attention:last-child { border-bottom: 0; }
+  .attention:hover, .attention:focus-visible { background: var(--subtle); outline: none; }
+  .attention > span:last-child { display: flex; flex-direction: column; gap: 2px; line-height: 1.45; }
+  .attention.bad b { color: var(--error); }
+  .bad-text { color: var(--error); }
+  .tab-count {
+    display: inline-block; min-width: 18px; margin-left: 5px; padding: 0 5px; border-radius: 9px;
+    background: var(--error); color: var(--ink-invert); font-size: 11px; line-height: 18px; text-align: center;
+  }
+  .tiles { grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 520px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+  .tile .delta { display: block; font-size: 12px; font-weight: 400; margin-top: 2px; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+  .bar-track.stacked { display: flex; }
+  .bar-track.stacked .bar-fill { border-radius: 0; }
+  .bar-track.stacked .bar-fill:last-child { border-radius: 0 4px 4px 0; }
+  .bar-fill.light { background: color-mix(in srgb, var(--tide) 35%, transparent); }
+  .bar-fill.hot { background: var(--sunset); }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin-top: 8px; font-size: 12px; color: var(--secondary-ink); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .feedback { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .feedback:last-child { border-bottom: 0; }
+  .feedback a { color: var(--deep-water); }
+  .feedback-body { margin-top: 4px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+  @media (max-width: 480px) {
+    .bar-row { grid-template-columns: 110px 1fr 76px; }
+    .status-row { gap: 12px; }
+    .status-row > span:last-child { text-align: right; }
+  }
+  /* 좁은 화면에서 표가 칸을 쪼개 "활/성"처럼 세로로 꺾이면 못 읽는다 — 줄바꿈 대신 가로 스크롤. */
+  .scroll th, .scroll td { white-space: nowrap; }
