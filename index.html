@@ -20,6 +20,7 @@
   <nav class="tabbar" role="tablist">
     <button class="tab" role="tab" data-tab="summary">요약</button>
     <button class="tab" role="tab" data-tab="couples">커플</button>
+    <button class="tab" role="tab" data-tab="usage">사용</button>
     <button class="tab" role="tab" data-tab="trends">추세</button>
     <button class="tab" role="tab" data-tab="revenue">수익</button>
     <button class="tab" role="tab" data-tab="ops">운영<span id="ops-count" class="tab-count" hidden></span></button>
@@ -40,13 +41,32 @@
   </div>
 
   <div id="panel-couples" class="panel" role="tabpanel" hidden>
+    <h2>커플에게 필요한 것</h2>
+    <div class="card" id="couple-needs"></div>
     <h2>커플별 활동 (14일)</h2>
     <div class="card scroll" id="couple-table"></div>
+    <div class="muted hint">줄을 누르면 두 사람 각각의 접속·알림·연동·위젯과 탭별 사용을 펼쳐 봅니다. 시각은 이 화면을 보는 기기 기준입니다.</div>
     <h2>미연결 계정</h2>
     <div class="card" id="unpaired"></div>
     <h2>나라별 사용자</h2>
     <div class="card" id="countries"></div>
     <div class="muted hint">심사용 데모 계정은 뺐습니다. 나라는 가입 때 고른 도시의 국가 코드 기준입니다.</div>
+  </div>
+
+  <div id="panel-usage" class="panel" role="tabpanel" hidden>
+    <div class="muted hint" style="margin-top:12px">화면을 연 기록은 없어서, 탭마다 남은 흔적(만든 일정·쪽지·버킷, 위젯 설치·탭)으로 셉니다.</div>
+    <h2>홈 · 접속</h2>
+    <div class="card" id="usage-home"></div>
+    <h2>캘린더 탭</h2>
+    <div class="card" id="usage-calendar"></div>
+    <h2>쪽지 탭</h2>
+    <div class="card" id="usage-notes"></div>
+    <h2>버킷 탭</h2>
+    <div class="card" id="usage-bucket"></div>
+    <h2>위젯</h2>
+    <div class="card" id="usage-widgets"></div>
+    <h2>언제 쓰나 (시간대)</h2>
+    <div class="card scroll" id="usage-hours"></div>
   </div>
 
   <div id="panel-trends" class="panel" role="tabpanel" hidden>

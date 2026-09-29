@@ -24,7 +24,8 @@
   body {
     background: var(--canvas); color: var(--ink);
     font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
-    padding: 16px; max-width: 720px; margin: 0 auto;
+    /* 커플 표가 열 10개라 720px에선 필요한 것 열이 스크롤 밖으로 밀린다. */
+    padding: 16px; max-width: 1040px; margin: 0 auto;
   }
   h1 { font-size: 20px; margin: 8px 0 16px; }
   h2 { font-size: 15px; margin: 24px 0 8px; color: var(--secondary-ink); font-weight: 600; }
@@ -168,3 +169,49 @@
   }
   /* 좁은 화면에서 표가 칸을 쪼개 "활/성"처럼 세로로 꺾이면 못 읽는다 — 줄바꿈 대신 가로 스크롤. */
   .scroll th, .scroll td { white-space: nowrap; }
+
+  /* 커플 니즈: 칩은 요약·필터, 태그는 표 안 표기. 색은 급함(bad·warn)·기회(opp)·참고(info) 네 단계뿐이다. */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    width: auto; margin: 0; padding: 6px 10px; font-size: 13px; font-weight: 500; border-radius: 999px;
+    background: var(--subtle); color: var(--ink); border: 1px solid transparent;
+  }
+  .chip b { margin-left: 4px; }
+  .chip.bad b { color: var(--error); }
+  .chip.warn b { color: var(--sunset); }
+  .chip.opp b { color: var(--deep-water); }
+  .chip.on { border-color: var(--ink); background: var(--surface); }
+  .chip.clear { color: var(--secondary-ink); }
+  .need {
+    display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px;
+    margin: 1px 3px 1px 0; white-space: nowrap;
+  }
+  .need.bad { background: color-mix(in srgb, var(--error) 14%, transparent); color: var(--error); }
+  .need.warn { background: color-mix(in srgb, var(--sunset) 18%, transparent); color: var(--ink); }
+  .need.opp { background: color-mix(in srgb, var(--tide) 22%, transparent); color: var(--deep-water); }
+  .need.info { background: var(--subtle); color: var(--secondary-ink); }
+  td.needs { text-align: left; }
+  .couple-row { cursor: pointer; }
+  .couple-row:hover td, .couple-row.open td { background: var(--subtle); }
+  .couple-row:focus-visible { outline: 2px solid var(--tide); outline-offset: -2px; }
+  tr.couple-detail > td { text-align: left; white-space: normal; background: var(--canvas); padding: 12px; }
+  .detail { display: flex; flex-direction: column; gap: 12px; max-width: 900px; }
+  .need-list { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+  .members, .tab-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .member, .tab-cards > div { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+  .member-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; }
+  .tab-cards > div > b { display: block; margin-bottom: 2px; font-size: 13px; }
+  .detail .status-row { gap: 12px; }
+  .detail .status-row > span:last-child { text-align: right; }
+  .strip { display: inline-flex; gap: 2px; vertical-align: -1px; }
+  .strip i { width: 7px; height: 11px; border-radius: 2px; background: var(--subtle); }
+  .strip i.on { background: var(--tide); }
+  .ok-text { color: var(--deep-water); }
+  @media (max-width: 640px) { .members, .tab-cards { grid-template-columns: 1fr; } }
+  /* "60/113쌍 · 53%"는 76px 칸에서 두 줄로 꺾인다. */
+  .bar-row.reach { margin-top: 0; grid-template-columns: 170px 1fr 120px; }
+  table.hours { table-layout: fixed; min-width: 560px; }
+  table.hours th { font-weight: 400; color: var(--secondary-ink); font-size: 11px; text-align: left; padding: 2px 0; }
+  table.hours th:first-child, table.hours td:first-child { width: 128px; }
+  table.hours td.cell { padding: 0; height: 22px; border: 1px solid var(--canvas); border-radius: 3px; }
+  table.hours td.peak, table.hours th:last-child { width: 40px; text-align: right; }

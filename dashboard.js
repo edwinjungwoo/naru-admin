@@ -39,7 +39,7 @@ function show(section) {
 }
 
 // 탭은 URL 해시가 원본이다 — 새로고침·뒤로가기에도 보던 탭이 유지된다.
-const TABS = ["summary", "couples", "trends", "revenue", "ops"];
+const TABS = ["summary", "couples", "usage", "trends", "revenue", "ops"];
 function selectTab(name) {
   const tab = TABS.includes(name) ? name : "summary";
   for (const t of TABS) {
@@ -52,7 +52,8 @@ document.querySelectorAll(".tab").forEach((b) => b.onclick = () => selectTab(b.d
 window.addEventListener("hashchange", () => selectTab(location.hash.slice(1)));
 
 const SECTION_IDS = ["attention", "summary-tiles", "summary-spark", "summary-membership",
-  "couple-table", "unpaired", "countries", "signups", "deletions", "dau", "feature-usage",
+  "couple-needs", "couple-table", "unpaired", "countries",
+  "usage-home", "usage-calendar", "usage-notes", "usage-bucket", "usage-widgets", "usage-hours", "signups", "deletions", "dau", "feature-usage",
   "retention", "activation", "milestones", "funnel", "nudges",
   "payment-detail", "membership-dist", "membership-table", "paywall",
   "pipeline-detail", "cron", "http", "gcal", "push", "holidays", "storage", "versions", "feedback"];
@@ -200,6 +201,7 @@ async function load(options = {}) {
   renderCountries(data.users_by_country);
   renderNudges(data.event_counts_14d);
   renderCouples(data);
+  renderUsage(data);
   renderRevenue(data);
   renderDau(data.actives_daily);
   renderFeatureUsage(data.feature_usage_weekly);
@@ -668,66 +670,333 @@ const MEMBERSHIP_BADGE = {
 const LIFETIME_SOURCE = { seed: "시드", beta_gift: "베타 선물", store: "스토어 결제" };
 
 let coupleSort = { key: "last_active_at", dir: -1 };
+let needFilter = null;
+let openCouple = null;
+
+// 시각을 같이 보인다 — "오늘"만으로는 방금 쓴 건지 새벽에 한 번 연 건지 모른다.
+// 기준은 보는 사람(어드민)의 시계다. 커플의 현지 시각은 상세에서 따로 보인다.
+function fmtWhen(iso) {
+  if (!iso) return "기록 없음";
+  const d = new Date(iso);
+  const hm = d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
+  const startOfDay = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((startOfDay(new Date()) - startOfDay(d)) / 86400000);
+  if (days <= 0) return `오늘 ${hm}`;
+  if (days === 1) return `어제 ${hm}`;
+  if (days < 7) return `${days}일 전 ${hm}`;
+  return `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+}
+function fmtDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  return `${d.getMonth() + 1}/${d.getDate()} <span class="muted">(${days <= 0 ? "오늘" : `${days}일 전`})</span>`;
+}
+// 상대 도시의 지금 시각 — 롱디 커플이 "지금 뭘 할 시간인지"가 곧 사용 패턴의 이유다.
+function localNow(offsetMin) {
+  const d = new Date(Date.now() + (Number(offsetMin) + new Date().getTimezoneOffset()) * 60000);
+  return d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+const WIDGET_NAMES = {
+  NaruSameSkyWidget: "지금", NaruOverlapVennWidget: "캘린더", NaruPartnerClockWidget: "하루",
+  NaruLatestNoteWidget: "쪽지", NaruDaysWidget: "디데이", NaruPartnerDayWidget: "하루(옛)",
+};
+
+// 커플 한 쌍이 지금 무엇이 필요한지. 판정은 이 표 하나에서만 한다 — 요약 칩·표 태그·상세가 같은 결과를 본다.
+// level: bad(놓치는 중) · warn(막혀 있음) · opp(기회) · info(참고)
+const NEED_RULES = [
+  ["churned", "bad", "이탈", "21일 넘게 둘 다 안 들어옴",
+    (c) => c.idleDays > 21],
+  ["dormant", "warn", "휴면", "7~21일째 둘 다 안 들어옴",
+    (c) => c.idleDays > 7 && c.idleDays <= 21],
+  ["one_side", "warn", "한쪽만 씀", "한 명은 14일 안에 들어왔는데 상대는 0일 — 상대를 다시 부를 계기가 필요",
+    (c) => c.members.length === 2 && c.members.some((m) => m.active_days_14.length >= 2) &&
+      c.members.some((m) => m.active_days_14.length === 0)],
+  ["no_push", "warn", "알림 못 받음", "푸시 토큰이 없는 사람이 있음 — 쪽지·일정 알림이 안 간다",
+    (c) => c.members.some((m) => !m.push)],
+  // 연결 당일은 아직 둘러보는 중이다 — 하루는 기다려 본다.
+  ["empty", "warn", "아직 빈 방", "연결하고 하루가 지났는데 일정·쪽지·버킷을 하나도 안 만듦 — 첫 행동이 필요",
+    (c) => !c.calendar.events_total && !c.notes.notes_total && !c.bucket.ideas_total &&
+      Date.now() - new Date(c.connected_at).getTime() > 86400000],
+  ["convert", "opp", "전환 후보", "체험이 3일 안에 끝나는데 14일간 5번 넘게 만들었음",
+    (c) => c.membership_state === "trial_active" && c.expiresInDays != null && c.expiresInDays <= 3 && c.made14 >= 5],
+  ["paywall", "opp", "체험 끝·계속 씀", "권한이 없는데 7일 안에 들어옴 — 결제 페이월을 보고 있는 사람들",
+    (c) => c.membership_state === "trial_over" && c.idleDays <= 7],
+  ["calendar_sync", "info", "캘린더 연동 후보", "14일간 일정 8개 이상을 손으로 넣고 캘린더 연동은 없음",
+    (c) => c.calendar.events_14d >= 8 && !c.members.some((m) => m.apple_calendar || m.google_calendar)],
+  ["sync_only", "info", "연동 일정만 봄", "연동한 일정은 있는데 앱에서 직접 만든 일정은 0",
+    (c) => (Number(c.synced.apple_events) + Number(c.synced.google_events)) > 0 && !c.calendar.events_total],
+  ["unanswered", "info", "쪽지 답이 없음", "14일간 쪽지를 썼는데 답장이 달린 쪽지가 없음",
+    (c) => c.notes.notes_14d > 0 && !c.notes.replied],
+  ["widget", "info", "위젯 권유 대상", "둘 다 14일 중 5일 넘게 들어오는데 위젯이 없음",
+    (c) => c.members.length === 2 && c.members.every((m) => m.active_days_14.length >= 5) &&
+      c.members.every((m) => !m.widgets.length)],
+  ["no_anniversary", "info", "기념일 없음", "기념일을 안 넣어서 디데이가 비어 있음",
+    (c) => !c.anniversary_date],
+];
+const NEED_ORDER = { bad: 0, warn: 1, opp: 2, info: 3 };
+
+function enrichCouple(c) {
+  const members = (c.members ?? []).map((m) => ({ ...m, active_days_14: m.active_days_14 ?? [], widgets: m.widgets ?? [] }));
+  const lastActive = members.map((m) => m.last_active_at).filter(Boolean).sort().pop() ?? null;
+  const idleDays = lastActive ? (Date.now() - new Date(lastActive).getTime()) / 86400000 : Infinity;
+  const expiresInDays = c.membership_expires_at
+    ? (new Date(c.membership_expires_at).getTime() - Date.now()) / 86400000 : null;
+  const offsets = members.map((m) => Number(m.utc_offset_min));
+  const gapHours = offsets.length === 2 ? Math.abs(offsets[0] - offsets[1]) / 60 : 0;
+  const row = {
+    ...c, members, lastActive, idleDays, expiresInDays, gapHours,
+    calendar: c.calendar ?? {}, synced: c.synced ?? {}, notes: c.notes ?? {}, bucket: c.bucket ?? {},
+    events_14d: Number(c.calendar?.events_14d ?? 0), notes_14d: Number(c.notes?.notes_14d ?? 0),
+    ideas_14d: Number(c.bucket?.ideas_14d ?? 0),
+  };
+  row.made14 = row.events_14d + row.notes_14d + row.ideas_14d;
+  row.last_active_at = lastActive;
+  row.needs = NEED_RULES.filter(([, , , , test]) => test(row)).map(([key, level, label, why]) => ({ key, level, label, why }))
+    .sort((a, b) => NEED_ORDER[a.level] - NEED_ORDER[b.level]);
+  return row;
+}
 
 function renderCouples(data) {
+  const detail = data.couple_detail;
+  if (!detail) { renderCouplesLegacy(data); return; }
+  const rows = detail.map(enrichCouple);
+
+  // 니즈 요약: 몇 쌍이 어떤 상태인지. 누르면 표를 그 커플만으로 거른다.
+  const counts = NEED_RULES.map(([key, level, label, why]) =>
+    ({ key, level, label, why, n: rows.filter((r) => r.needs.some((x) => x.key === key)).length }))
+    .filter((x) => x.n);
+  $("couple-needs").innerHTML = `<div class="chips">${counts.map((x) =>
+    `<button class="chip ${x.level}${needFilter === x.key ? " on" : ""}" data-need="${x.key}" title="${x.why}">
+       ${x.label} <b>${x.n}</b></button>`).join("")}
+     ${needFilter ? `<button class="chip clear" data-need="">전체 보기</button>` : ""}</div>
+    <div class="muted hint">${needFilter ? esc(NEED_RULES.find((r) => r[0] === needFilter)[3]) : "누르면 해당 커플만 봅니다. 한 커플이 여러 칩에 들 수 있어요."}</div>`;
+  $("couple-needs").querySelectorAll(".chip").forEach((b) => b.onclick = () => {
+    needFilter = b.dataset.need || null;
+    renderCouples(lastData);
+  });
+
+  const shown = needFilter ? rows.filter((r) => r.needs.some((x) => x.key === needFilter)) : rows;
+  const sorted = [...shown].sort((a, b) => {
+    const va = a[coupleSort.key], vb = b[coupleSort.key];
+    const cmp = coupleSort.key === "last_active_at" || coupleSort.key === "connected_at"
+      ? new Date(va ?? 0) - new Date(vb ?? 0)
+      : Number(va ?? 0) - Number(vb ?? 0);
+    return cmp * coupleSort.dir;
+  });
+  const sortableHead = (key, label) =>
+    `<th class="sortable" data-key="${key}" tabindex="0" role="button" aria-sort="${coupleSort.key === key ? (coupleSort.dir === -1 ? "descending" : "ascending") : "none"}">${label}</th>`;
+  const names = (r) => r.members.map((m) => esc(m.nickname)).join(" · ") + (r.members.length < 2 ? ` <span class="muted">(혼자)</span>` : "");
+  const dday = (r) => r.expiresInDays == null ? "" : r.expiresInDays < 0 ? " 만료" : ` D-${Math.ceil(r.expiresInDays)}`;
+  $("couple-table").innerHTML = shown.length ? `<table class="couples">
+    <thead><tr><th>커플</th><th>상태</th><th>멤버십</th>
+      ${sortableHead("last_active_at", "마지막 접속")}${sortableHead("connected_at", "연결")}
+      ${sortableHead("gapHours", "시차")}
+      ${sortableHead("events_14d", "일정")}${sortableHead("notes_14d", "쪽지")}${sortableHead("ideas_14d", "버킷")}<th>필요한 것</th></tr></thead>
+    <tbody>${sorted.map((r) => {
+      const [cls, label] = coupleStatus(r.lastActive);
+      const needs = r.needs.filter((n) => n.level !== "info").slice(0, 2);
+      const more = r.needs.length - needs.length;
+      return `<tr class="couple-row${openCouple === r.couple_id ? " open" : ""}" data-id="${r.couple_id}" tabindex="0">
+        <td>${names(r)}</td>
+        <td><span class="badge ${cls}">${label}</span></td>
+        <td>${r.membership_state ? `<span class="badge plus">${MEMBERSHIP_BADGE[r.membership_state] ?? r.membership_state}${dday(r)}</span>` : ""}</td>
+        <td title="${r.lastActive ?? ""}">${fmtWhen(r.lastActive)}</td>
+        <td title="${r.connected_at}">${fmtDate(r.connected_at)}</td>
+        <td>${r.gapHours ? `${+r.gapHours.toFixed(1)}h` : "—"}</td>
+        <td>${fmtInt(r.events_14d)}</td><td>${fmtInt(r.notes_14d)}</td><td>${fmtInt(r.ideas_14d)}</td>
+        <td class="needs">${needs.map((n) => `<span class="need ${n.level}">${n.label}</span>`).join("")}${more > 0 ? `<span class="muted">+${more}</span>` : ""}</td></tr>
+        ${openCouple === r.couple_id ? `<tr class="couple-detail"><td colspan="10">${coupleDetailHtml(r)}</td></tr>` : ""}`;
+    }).join("")}</tbody></table>` : `<div class="empty">해당하는 커플이 없어요.</div>`;
+
+  const triggerSort = (th) => {
+    coupleSort = th.dataset.key === coupleSort.key
+      ? { key: coupleSort.key, dir: -coupleSort.dir } : { key: th.dataset.key, dir: -1 };
+    renderCouples(lastData);
+  };
+  const onKey = (fn) => (event) => {
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); fn(); }
+  };
+  $("couple-table").querySelectorAll("th.sortable").forEach((th) => {
+    th.onclick = () => triggerSort(th);
+    th.onkeydown = onKey(() => triggerSort(th));
+  });
+  $("couple-table").querySelectorAll("tr.couple-row").forEach((tr) => {
+    const toggle = () => { openCouple = openCouple === tr.dataset.id ? null : tr.dataset.id; renderCouples(lastData); };
+    tr.onclick = toggle;
+    tr.onkeydown = onKey(toggle);
+  });
+  renderUnpaired(data);
+}
+
+function coupleDetailHtml(r) {
+  const today = new Date();
+  // 14칸 출석표. 하트비트가 UTC 날짜라 칸도 UTC로 센다.
+  const strip = (days) => {
+    const set = new Set(days);
+    return `<span class="strip" aria-label="14일 중 ${days.length}일 접속">${Array.from({ length: 14 }, (_, i) => {
+      const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - 13 + i)).toISOString().slice(0, 10);
+      return `<i class="${set.has(d) ? "on" : ""}" title="${d}"></i>`;
+    }).join("")}</span> <span class="muted">${days.length}/14일</span>`;
+  };
+  const yes = (v, on, off) => v ? `<span class="ok-text">${on}</span>` : `<span class="bad-text">${off}</span>`;
+  const member = (m) => `<div class="member">
+    <div class="member-head"><b>${esc(m.nickname)}</b>
+      <span class="muted">${esc(m.city ?? "")}${m.country_code ? ` · ${countryName(m.country_code)}` : ""} · 지금 ${localNow(m.utc_offset_min)}</span></div>
+    ${statusRow("마지막 접속", `<span title="${m.last_active_at ?? ""}">${fmtWhen(m.last_active_at)}</span>`)}
+    ${statusRow("마지막으로 뭔가 만든 때", `<span title="${m.last_action_at ?? ""}">${fmtWhen(m.last_action_at)}</span>`)}
+    ${statusRow("14일 접속", strip(m.active_days_14))}
+    ${statusRow("14일 만든 것", `일정 ${fmtInt(m.events_14d)} · 쪽지 ${fmtInt(m.notes_14d)} · 답장 ${fmtInt(m.replies_14d)} · 버킷 ${fmtInt(m.ideas_14d)}`)}
+    ${statusRow("알림", yes(m.push, "받음", "토큰 없음"))}
+    ${statusRow("캘린더 연동", [m.apple_calendar && "Apple", m.google_calendar && "Google"].filter(Boolean).join(" · ") || `<span class="muted">없음</span>`)}
+    ${statusRow("위젯", m.widgets.length ? m.widgets.map((k) => WIDGET_NAMES[k] ?? esc(k)).join(" · ") : `<span class="muted">없음</span>`)}
+    ${statusRow("가입 · 앱 버전", `${fmtDate(m.joined_at)} · ${esc(m.app_version ?? "—")}`)}
+  </div>`;
+  const cal = r.calendar, notes = r.notes, bucket = r.bucket;
+  const pct = (a, b) => Number(b) ? `${Math.round(100 * Number(a) / Number(b))}%` : "—";
+  return `<div class="detail">
+    ${r.needs.length ? `<div class="need-list">${r.needs.map((n) =>
+      `<div><span class="need ${n.level}">${n.label}</span> <span class="muted">${n.why}</span></div>`).join("")}</div>` : ""}
+    <div class="members">${r.members.map(member).join("")}</div>
+    <div class="tab-cards">
+      <div><b>캘린더</b>
+        ${statusRow("직접 만든 일정", `${fmtInt(cal.events_total)} <span class="muted">(14일 ${fmtInt(cal.events_14d)})</span>`)}
+        ${statusRow("같이 보는 일정 · 반복 · 이모지", `${pct(cal.shared, cal.events_total)} · ${pct(cal.series, cal.events_total)} · ${pct(cal.categorized, cal.events_total)}`)}
+        ${statusRow("연동해 온 일정", `Apple ${fmtInt(r.synced.apple_events)} · Google ${fmtInt(r.synced.google_events)}`)}
+        ${statusRow("마지막", fmtWhen(cal.last_at))}</div>
+      <div><b>쪽지</b>
+        ${statusRow("쪽지", `${fmtInt(notes.notes_total)} <span class="muted">(14일 ${fmtInt(notes.notes_14d)})</span>`)}
+        ${statusRow("손그림 · 답장 달린 비율", `${pct(notes.drawings, notes.notes_total)} · ${pct(notes.replied, notes.notes_total)}`)}
+        ${statusRow("마지막", fmtWhen(notes.last_at))}</div>
+      <div><b>버킷</b>
+        ${statusRow("버킷", `${fmtInt(bucket.ideas_total)} <span class="muted">(14일 ${fmtInt(bucket.ideas_14d)})</span>`)}
+        ${statusRow("링크 · 사진 · 장소 · 태그", `${pct(bucket.with_link, bucket.ideas_total)} · ${pct(bucket.with_image, bucket.ideas_total)} · ${pct(bucket.with_place, bucket.ideas_total)} · ${pct(bucket.tagged, bucket.ideas_total)}`)}
+        ${statusRow("마지막", fmtWhen(bucket.last_at))}</div>
+      <div><b>관계</b>
+        ${statusRow("연결", fmtDate(r.connected_at))}
+        ${statusRow("기념일", r.anniversary_date ? esc(r.anniversary_date) : `<span class="muted">없음</span>`)}
+        ${statusRow("시차", r.gapHours ? `${+r.gapHours.toFixed(1)}시간` : "같은 시간대")}
+        ${Number(r.moments) ? statusRow("모먼트", fmtInt(r.moments)) : ""}</div>
+    </div></div>`;
+}
+
+// 0119 전 스냅샷(캐시된 응답 등)에서도 표가 비지 않게 옛 표를 남긴다.
+function renderCouplesLegacy(data) {
   const rows = data.couple_activity;
+  $("couple-needs").innerHTML = "";
   if (!rows) { missingKey($("couple-table")); missingKey($("unpaired")); return; }
-  if (!rows.length) {
-    $("couple-table").innerHTML = `<div class="empty">연결된 커플이 아직 없어요.</div>`;
-  } else {
-    // 멤버십은 관계 뷰에서 닉네임 쌍으로 잇는다 — 커플 뷰에 relationship_id를
-    // 실어 나르는 것보다 못하지만, 표시용 매칭엔 충분하고 스냅샷이 한 번에 온다.
-    const stateOf = (r) => (data.membership_rows ?? []).find((m) =>
-      (m.member_one === r.member_one && m.member_two === r.member_two) ||
-      (m.member_one === r.member_two && m.member_two === r.member_one))?.state;
-    const sorted = [...rows].sort((a, b) => {
-      const va = a[coupleSort.key], vb = b[coupleSort.key];
-      const cmp = coupleSort.key === "last_active_at" || coupleSort.key === "connected_at"
-        ? new Date(va ?? 0) - new Date(vb ?? 0)
-        : Number(va ?? 0) - Number(vb ?? 0);
-      return cmp * coupleSort.dir;
-    });
-    const sortableHead = (key, label) =>
-      `<th class="sortable" data-key="${key}" tabindex="0" role="button" aria-sort="${coupleSort.key === key ? (coupleSort.dir === -1 ? "descending" : "ascending") : "none"}">${label}</th>`;
-    $("couple-table").innerHTML = `<table>
-      <thead><tr><th>커플</th><th>상태</th><th>멤버십</th>
-        ${sortableHead("last_active_at", "마지막 활동")}${sortableHead("connected_at", "연결")}
-        ${sortableHead("events_14d", "일정")}${sortableHead("notes_14d", "쪽지")}${sortableHead("ideas_14d", "버킷")}<th>위젯</th></tr></thead>
-      <tbody>${sorted.map((r) => {
-        const [cls, label] = coupleStatus(r.last_active_at);
-        const m = stateOf(r);
-        return `<tr><td>${esc(r.member_one)} · ${esc(r.member_two)}</td>
-          <td><span class="badge ${cls}">${label}</span></td>
-          <td>${m ? `<span class="badge plus">${MEMBERSHIP_BADGE[m] ?? m}</span>` : ""}</td>
-          <td title="${r.last_active_at ?? ""}">${relTime(r.last_active_at)}</td>
-          <td title="${r.connected_at}">${relTime(r.connected_at)}</td>
-          <td>${fmtInt(r.events_14d)}</td><td>${fmtInt(r.notes_14d)}</td><td>${fmtInt(r.ideas_14d)}</td>
-          <td>${r.widget_active ? "●" : ""}</td></tr>`;
-      }).join("")}</tbody></table>`;
-    const triggerSort = (th) => {
-      coupleSort = th.dataset.key === coupleSort.key
-        ? { key: coupleSort.key, dir: -coupleSort.dir } : { key: th.dataset.key, dir: -1 };
-      renderCouples(lastData);
-    };
-    $("couple-table").querySelectorAll("th.sortable").forEach((th) => {
-      th.onclick = () => triggerSort(th);
-      th.onkeydown = (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          if (event.key === " ") event.preventDefault();
-          triggerSort(th);
-        }
-      };
-    });
-  }
+  $("couple-table").innerHTML = rows.length ? `<table>
+    <thead><tr><th>커플</th><th>상태</th><th>마지막 접속</th><th>연결</th><th>일정</th><th>쪽지</th><th>버킷</th></tr></thead>
+    <tbody>${rows.map((r) => {
+      const [cls, label] = coupleStatus(r.last_active_at);
+      return `<tr><td>${esc(r.member_one)} · ${esc(r.member_two)}</td><td><span class="badge ${cls}">${label}</span></td>
+        <td>${fmtWhen(r.last_active_at)}</td><td>${fmtDate(r.connected_at)}</td>
+        <td>${fmtInt(r.events_14d)}</td><td>${fmtInt(r.notes_14d)}</td><td>${fmtInt(r.ideas_14d)}</td></tr>`;
+    }).join("")}</tbody></table>` : `<div class="empty">연결된 커플이 아직 없어요.</div>`;
+  renderUnpaired(data);
+}
+
+function renderUnpaired(data) {
   const un = data.unpaired_accounts ?? [];
   $("unpaired").innerHTML = un.length
     ? `<details class="unpaired"><summary>미연결 계정 ${un.length}명</summary><table><tbody>
         ${un.map((u) => `<tr><td>${esc(u.nickname)}</td>
-          <td title="${u.created_at}">가입 ${relTime(u.created_at)}</td>
-          <td title="${u.last_active_at ?? ""}">${relTime(u.last_active_at)}</td></tr>`).join("")}
+          <td title="${u.created_at}">가입 ${fmtWhen(u.created_at)}</td>
+          <td title="${u.last_active_at ?? ""}">접속 ${fmtWhen(u.last_active_at)}</td></tr>`).join("")}
       </tbody></table></details>`
     : `<div class="empty">모든 계정이 연결돼 있어요.</div>`;
 }
+
+// ── 사용 탭: 앱 탭마다 몇 커플이 어떤 방식으로 쓰는지 ─────────────────────────
+function renderUsage(data) {
+  const u = data.tab_usage;
+  const ids = ["usage-home", "usage-calendar", "usage-notes", "usage-bucket", "usage-widgets", "usage-hours"];
+  if (!u) { ids.forEach((id) => missingKey($(id))); return; }
+  const total = Number(u.connected_couples) || 1;
+  // 한 줄 요약 막대: 전체 커플 중 몇 쌍이 14일 안에 이 탭에 뭔가 남겼는지.
+  const reach = (n, label) => {
+    const pct = Math.round(100 * Number(n) / total);
+    return `<div class="bar-row reach" tabindex="0" aria-label="${label}: ${n}쌍, ${pct}%">
+      <span>${label}</span><div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+      <span class="muted">${fmtInt(n)}/${fmtInt(total)}쌍 · ${pct}%</span></div>`;
+  };
+  const h = u.home;
+  $("usage-home").innerHTML =
+    statusRow("7일 안에 들어온 사람", `${fmtInt(h.active_users_7d)}명`) +
+    statusRow("둘 다 들어온 커플 (7일)", `${fmtInt(h.both_active_couples_7d)}쌍`) +
+    statusRow("한 명만 들어온 커플 (7일)", `${fmtInt(h.one_side_couples_7d)}쌍`, Number(h.one_side_couples_7d) ? "warn" : "") +
+    statusRow("14일 중 평균 접속일", `${h.avg_active_days_14d ?? "—"}일`) +
+    statusRow("매일 쓰는 사람 (14일 중 10일 이상)", `${fmtInt(h.daily_habit_users)}명`);
+
+  const c = u.calendar;
+  const cats = (c.top_categories ?? []).map((x) => `${esc(x.category)} ${fmtInt(x.cnt)}`).join(" · ");
+  $("usage-calendar").innerHTML = reach(c.couples_14d, "14일 안에 일정 만든 커플") +
+    statusRow("만든 사람 · 일정 수 (14일)", `${fmtInt(c.users_14d)}명 · ${fmtInt(c.events_14d)}개`) +
+    statusRow("같이 보는 일정 비율", `${c.shared_pct ?? "—"}%`) +
+    statusRow("반복 일정 비율", `${c.series_pct ?? "—"}%`) +
+    statusRow("이모지(분류) 단 비율", `${c.categorized_pct ?? "—"}%`) +
+    statusRow("캘린더 연동한 사람", `Apple ${fmtInt(c.apple_users)} · Google ${fmtInt(c.google_users)}`) +
+    (cats ? statusRow("많이 쓰는 이모지 (30일)", cats) : "") +
+    `<div class="muted hint">가입 때 자동으로 생기는 첫 일정과 연동해 온 일정은 빼고, 사람이 앱에서 직접 만든 일정만 셉니다. 비율은 30일 기준.</div>`;
+
+  const n = u.notes;
+  $("usage-notes").innerHTML = reach(n.couples_14d, "14일 안에 쪽지 쓴 커플") +
+    statusRow("쪽지 · 답장 (14일)", `${fmtInt(n.notes_14d)} · ${fmtInt(n.replies_14d)}`) +
+    statusRow("손그림 비율", `${n.drawing_pct ?? "—"}%`) +
+    statusRow("상대가 답한 쪽지", `${n.replied_pct ?? "—"}%`) +
+    statusRow("첫 답장까지 걸린 시간 (중앙값)", n.median_reply_minutes != null ? fmtMinutes(n.median_reply_minutes) : "—");
+
+  const b = u.bucket;
+  $("usage-bucket").innerHTML = reach(b.couples_14d, "14일 안에 버킷 담은 커플") +
+    statusRow("담은 버킷 (14일)", fmtInt(b.ideas_14d)) +
+    statusRow("링크로 담은 비율", `${b.link_pct ?? "—"}%`) +
+    statusRow("사진 있는 비율", `${b.image_pct ?? "—"}%`) +
+    statusRow("장소(내 도시·상대 도시)를 정한 비율", `${b.place_pct ?? "—"}%`) +
+    statusRow("태그 단 비율", `${b.tagged_pct ?? "—"}%`);
+
+  const widgets = u.widgets ?? [];
+  const maxW = Math.max(...widgets.map((w) => Number(w.installed_users)), 1);
+  $("usage-widgets").innerHTML = widgets.length ? widgets.map((w) =>
+    `<div class="bar-row" tabindex="0" aria-label="${WIDGET_NAMES[w.kind] ?? w.kind}: ${w.installed_users}명">
+      <span>${WIDGET_NAMES[w.kind] ?? esc(w.kind)}</span>
+      <div class="bar-track"><div class="bar-fill" style="width:${(100 * w.installed_users / maxW).toFixed(1)}%"></div></div>
+      <span class="muted">${fmtInt(w.installed_users)}명 · 탭 ${fmtInt(w.taps_14d)}</span></div>`).join("") +
+    `<div class="muted hint">14일 안에 홈 화면에 올라가 있던 사람 수와 그 위젯을 눌러 앱을 연 횟수.</div>`
+    : `<div class="empty">14일간 위젯 기록 없음</div>`;
+  if (Number(u.moments?.total)) {
+    $("usage-widgets").innerHTML += statusRow("모먼트", `${fmtInt(u.moments.total)}장 · ${fmtInt(u.moments.couples)}쌍`);
+  }
+  renderHours(data.activity_hours);
+}
+const fmtMinutes = (m) => {
+  const v = Number(m);
+  if (v < 60) return `${v}분`;
+  if (v < 1440) return `${Math.round(v / 6) / 10}시간`;
+  return `${Math.round(v / 144) / 10}일`;
+};
+
+// 시간대 격자: 줄마다 자기 최댓값으로 진하기를 정한다 — 앱 열기와 버킷은 규모가 달라
+// 같은 눈금이면 버킷 줄이 통째로 흰색이 된다. 시각은 행동한 사람의 현지 시각.
+const HOUR_ROWS = [["open", "앱 열기(하루 첫)"], ["events", "일정"], ["notes", "쪽지"], ["replies", "답장"], ["ideas", "버킷"]];
+function renderHours(rows) {
+  const el = $("usage-hours");
+  if (!rows) { missingKey(el); return; }
+  const by = {};
+  for (const r of rows) by[`${r.feature}|${r.hour}`] = Number(r.cnt);
+  const head = Array.from({ length: 24 }, (_, h) => `<th>${h % 3 === 0 ? h : ""}</th>`).join("");
+  const body = HOUR_ROWS.map(([key, label]) => {
+    const vals = Array.from({ length: 24 }, (_, h) => by[`${key}|${h}`] ?? 0);
+    const max = Math.max(...vals, 1), sum = vals.reduce((a, b) => a + b, 0);
+    const peak = vals.indexOf(Math.max(...vals));
+    return `<tr><td>${label} <span class="muted">${fmtInt(sum)}</span></td>${vals.map((v, h) =>
+      `<td class="cell" title="${label} ${h}시: ${v}" style="background:color-mix(in srgb, var(--tide) ${Math.round(100 * v / max)}%, transparent)"></td>`).join("")}
+      <td class="muted peak">${sum ? `${peak}시` : ""}</td></tr>`;
+  }).join("");
+  el.innerHTML = `<table class="hours"><thead><tr><th></th>${head}<th>최다</th></tr></thead><tbody>${body}</tbody></table>
+    <div class="muted hint">최근 30일, 행동한 사람의 현지 시각 기준. 줄마다 가장 많은 시간을 가장 진하게 칠했습니다.</div>`;
+}
+
 
 function renderRevenue(data) {
   const s = data.membership_summary, rows = data.membership_rows;
