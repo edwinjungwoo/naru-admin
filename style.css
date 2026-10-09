@@ -24,8 +24,8 @@
   body {
     background: var(--canvas); color: var(--ink);
     font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
-    /* 커플 표가 열 10개라 720px에선 필요한 것 열이 스크롤 밖으로 밀린다. */
-    padding: 16px; max-width: 1040px; margin: 0 auto;
+    /* 커플 표가 열 12개라 좁으면 필요한 것 열이 스크롤 밖으로 밀린다. */
+    padding: 16px; max-width: 1200px; margin: 0 auto;
   }
   h1 { font-size: 20px; margin: 8px 0 16px; }
   h2 { font-size: 15px; margin: 24px 0 8px; color: var(--secondary-ink); font-weight: 600; }
@@ -215,3 +215,9 @@
   table.hours th:first-child, table.hours td:first-child { width: 128px; }
   table.hours td.cell { padding: 0; height: 22px; border: 1px solid var(--canvas); border-radius: 3px; }
   table.hours td.peak, table.hours th:last-child { width: 40px; text-align: right; }
+  /* 커플 표의 위젯 칸: 두 사람 것을 한 칸에 나란히. 칩 하나가 한 사람이다. */
+  .wchip {
+    display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 999px; margin-right: 2px;
+    background: color-mix(in srgb, var(--tide) 18%, transparent); color: var(--deep-water);
+  }
+  .detail .widget-line { padding-left: 12px; font-size: 12px; }

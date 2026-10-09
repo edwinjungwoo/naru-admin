@@ -52,7 +52,7 @@ document.querySelectorAll(".tab").forEach((b) => b.onclick = () => selectTab(b.d
 window.addEventListener("hashchange", () => selectTab(location.hash.slice(1)));
 
 const SECTION_IDS = ["attention", "summary-tiles", "summary-spark", "summary-membership",
-  "couple-needs", "couple-table", "unpaired", "countries",
+  "couple-needs", "couple-widgets", "couple-table", "unpaired", "countries",
   "usage-home", "usage-calendar", "usage-notes", "usage-bucket", "usage-widgets", "usage-hours", "signups", "deletions", "dau", "feature-usage",
   "retention", "activation", "milestones", "funnel", "nudges",
   "payment-detail", "membership-dist", "membership-table", "paywall",
@@ -551,6 +551,22 @@ function renderOps(data) {
         <div class="bar-track"><div class="bar-fill" style="width:${(100 * v.users / max).toFixed(1)}%"></div></div>
         <span class="muted" title="${v.last_seen}">${fmtInt(v.users)}명 · ${relTimeFine(v.last_seen)}</span></div>`).join("");
   }
+  // 0133: 온보딩 버전은 새로 온 사람만 본다. 기존 사용자가 업데이트했는지는 푸시 토큰이 실행마다 싣는 버전으로 본다.
+  const live = data.app_versions_live;
+  if (live?.length) {
+    const cmp = (a, b) => (b.app_version ?? "").localeCompare(a.app_version ?? "", undefined, { numeric: true });
+    const sorted = [...live].sort(cmp);
+    const max = Math.max(...sorted.map((v) => Number(v.users)), 1);
+    const total = sorted.reduce((n, v) => n + Number(v.users), 0);
+    $("versions").innerHTML += `<div class="muted" style="margin-top:12px">지금 쓰는 버전 (14일 안에 연 사람, 알림 켠 사람만 · ${fmtInt(total)}명)</div>` +
+      sorted.map((v) => {
+        const label = v.app_version ?? "1.0.6 이하";
+        return `<div class="bar-row" tabindex="0" aria-label="${esc(label)}: ${v.users}명">
+        <span class="mono">${esc(label)}</span>
+        <div class="bar-track"><div class="bar-fill${v.app_version ? "" : " light"}" style="width:${(100 * v.users / max).toFixed(1)}%"></div></div>
+        <span class="muted" title="${v.last_seen}">${fmtInt(v.users)}명 · ${Math.round(100 * v.users / total)}%</span></div>`;
+      }).join("");
+  }
 
   const feedback = data.feedback_recent;
   if (!feedback) missingKey($("feedback"));
@@ -699,9 +715,30 @@ function localNow(offsetMin) {
 }
 
 const WIDGET_NAMES = {
+  NaruPartnerMoment: "모먼트", NaruPartnerDrawingWidget: "낙서",
   NaruSameSkyWidget: "지금", NaruOverlapVennWidget: "캘린더", NaruPartnerClockWidget: "하루",
   NaruLatestNoteWidget: "쪽지", NaruDaysWidget: "디데이", NaruPartnerDayWidget: "하루(옛)",
 };
+const WIDGET_FAMILIES = {
+  systemSmall: "작게", systemMedium: "중간", systemLarge: "크게", systemExtraLarge: "아주 크게",
+  accessoryCircular: "잠금 원형", accessoryRectangular: "잠금 사각", accessoryInline: "잠금 한 줄",
+};
+const widgetName = (kind) => WIDGET_NAMES[kind] ?? esc(kind);
+
+// 설치 목록은 앱이 포그라운드일 때 하루 한 번 올라온다(SupabaseWidgetUsageService). 그래서
+// "마지막 확인"이 멈췄다는 건 둘 중 하나다 — 앱을 안 열었거나, 열었는데 그 위젯이 없었거나.
+// 확인 뒤로 사흘 넘게 앱을 열었으면 뺀 것으로 본다(하루 주기에 시차·실패 여유를 더한 값).
+const WIDGET_REMOVED_AFTER_DAYS = 3;
+function widgetState(w, lastActive) {
+  if (!w.last_seen_at) return ["tap_only", "설치 기록 없음"];
+  const seen = new Date(w.last_seen_at).getTime();
+  if (lastActive && (new Date(lastActive).getTime() - seen) / 86400000 > WIDGET_REMOVED_AFTER_DAYS) return ["removed", "뺀 듯"];
+  if ((Date.now() - seen) / 86400000 <= 14) return ["on", "있음"];
+  return ["stale", "오래 확인 안 됨"];
+}
+
+const SUBSCRIPTION_PLAN = (productID) =>
+  /yearly|annual/.test(productID ?? "") ? "연" : /monthly/.test(productID ?? "") ? "월" : "";
 
 // 커플 한 쌍이 지금 무엇이 필요한지. 판정은 이 표 하나에서만 한다 — 요약 칩·표 태그·상세가 같은 결과를 본다.
 // level: bad(놓치는 중) · warn(막혀 있음) · opp(기회) · info(참고)
@@ -729,16 +766,28 @@ const NEED_RULES = [
     (c) => (Number(c.synced.apple_events) + Number(c.synced.google_events)) > 0 && !c.calendar.events_total],
   ["unanswered", "info", "쪽지 답이 없음", "14일간 쪽지를 썼는데 답장이 달린 쪽지가 없음",
     (c) => c.notes.notes_14d > 0 && !c.notes.replied],
+  ["renew_off", "warn", "해지 예정", "구독 중인데 자동 갱신을 껐음 — 만료일에 떠난다",
+    (c) => c.membership_state === "subscribed" && c.subscription?.will_renew === false],
   ["widget", "info", "위젯 권유 대상", "둘 다 14일 중 5일 넘게 들어오는데 위젯이 없음",
     (c) => c.members.length === 2 && c.members.every((m) => m.active_days_14.length >= 5) &&
-      c.members.every((m) => !m.widgets.length)],
+      c.members.every((m) => !m.widgetsOn.length)],
+  ["widget_removed", "info", "위젯 뺌", `위젯을 올렸다가 지금은 하나도 없음 — 마지막 확인 뒤로 ${WIDGET_REMOVED_AFTER_DAYS}일 넘게 앱을 열었다`,
+    (c) => c.members.some((m) => !m.widgetsOn.length && m.widgetRows.some((w) => w.state === "removed"))],
   ["no_anniversary", "info", "기념일 없음", "기념일을 안 넣어서 디데이가 비어 있음",
     (c) => !c.anniversary_date],
 ];
 const NEED_ORDER = { bad: 0, warn: 1, opp: 2, info: 3 };
 
 function enrichCouple(c) {
-  const members = (c.members ?? []).map((m) => ({ ...m, active_days_14: m.active_days_14 ?? [], widgets: m.widgets ?? [] }));
+  const members = (c.members ?? []).map((m) => {
+    const widgetRows = (m.widget_detail ?? []).map((w) => {
+      const [state, stateLabel] = widgetState(w, m.last_active_at);
+      return { ...w, state, stateLabel };
+    });
+    // 0133 전 스냅샷에는 widget_detail이 없다 — 그땐 14일 목록을 "지금 있음"으로 본다.
+    const widgetsOn = m.widget_detail ? widgetRows.filter((w) => w.state === "on").map((w) => w.kind) : (m.widgets ?? []);
+    return { ...m, active_days_14: m.active_days_14 ?? [], widgets: m.widgets ?? [], widgetRows, widgetsOn };
+  });
   const lastActive = members.map((m) => m.last_active_at).filter(Boolean).sort().pop() ?? null;
   const idleDays = lastActive ? (Date.now() - new Date(lastActive).getTime()) / 86400000 : Infinity;
   const expiresInDays = c.membership_expires_at
@@ -753,6 +802,10 @@ function enrichCouple(c) {
   };
   row.made14 = row.events_14d + row.notes_14d + row.ideas_14d;
   row.last_active_at = lastActive;
+  // 표 정렬 키. 위젯은 "몇 명이 올렸나"가 먼저고 종류 수는 그다음이다 — 한 명이 셋 올린 커플보다 둘이 하나씩이 앞.
+  row.widgetUsers = members.filter((m) => m.widgetsOn.length).length;
+  row.widgetSort = row.widgetUsers * 100 + members.reduce((n, m) => n + m.widgetsOn.length, 0);
+  row.activeSort = Number(c.both_active_days_14 ?? 0) * 100 + members.reduce((n, m) => n + m.active_days_14.length, 0);
   row.needs = NEED_RULES.filter(([, , , , test]) => test(row)).map(([key, level, label, why]) => ({ key, level, label, why }))
     .sort((a, b) => NEED_ORDER[a.level] - NEED_ORDER[b.level]);
   return row;
@@ -789,10 +842,22 @@ function renderCouples(data) {
     `<th class="sortable" data-key="${key}" tabindex="0" role="button" aria-sort="${coupleSort.key === key ? (coupleSort.dir === -1 ? "descending" : "ascending") : "none"}">${label}</th>`;
   const names = (r) => r.members.map((m) => esc(m.nickname)).join(" · ") + (r.members.length < 2 ? ` <span class="muted">(혼자)</span>` : "");
   const dday = (r) => r.expiresInDays == null ? "" : r.expiresInDays < 0 ? " 만료" : ` D-${Math.ceil(r.expiresInDays)}`;
+  // 두 사람 값을 "가 · 나" 한 칸에 — 커플 앱에서 한쪽만 쓰는지가 숫자 하나보다 먼저 보여야 한다.
+  const activeCell = (r) => {
+    const both = r.both_active_days_14;
+    return `<span title="14일 중 각자 들어온 날${both != null ? ` · 같은 날 둘 다 들어온 날 ${both}일` : ""}">${r.members.map((m) => m.active_days_14.length).join(" · ")}` +
+      (both != null ? ` <span class="muted">함께 ${both}</span>` : "") + `</span>`;
+  };
+  const widgetCell = (r) => {
+    if (!r.widgetUsers) return `<span class="muted">—</span>`;
+    const title = r.members.map((m) => `${m.nickname}: ${m.widgetsOn.map((k) => WIDGET_NAMES[k] ?? k).join(", ") || "없음"}`).join(" / ");
+    return `<span class="widget-cell" title="${esc(title)}">${r.members.map((m) => m.widgetsOn.length
+      ? `<span class="wchip">${m.widgetsOn.map(widgetName).join("·")}</span>` : `<span class="muted">없음</span>`).join(" ")}</span>`;
+  };
   $("couple-table").innerHTML = shown.length ? `<table class="couples">
     <thead><tr><th>커플</th><th>상태</th><th>멤버십</th>
       ${sortableHead("last_active_at", "마지막 접속")}${sortableHead("connected_at", "연결")}
-      ${sortableHead("gapHours", "시차")}
+      ${sortableHead("gapHours", "시차")}${sortableHead("activeSort", "접속일")}${sortableHead("widgetSort", "위젯")}
       ${sortableHead("events_14d", "일정")}${sortableHead("notes_14d", "쪽지")}${sortableHead("ideas_14d", "버킷")}<th>필요한 것</th></tr></thead>
     <tbody>${sorted.map((r) => {
       const [cls, label] = coupleStatus(r.lastActive);
@@ -801,13 +866,14 @@ function renderCouples(data) {
       return `<tr class="couple-row${openCouple === r.couple_id ? " open" : ""}" data-id="${r.couple_id}" tabindex="0">
         <td>${names(r)}</td>
         <td><span class="badge ${cls}">${label}</span></td>
-        <td>${r.membership_state ? `<span class="badge plus">${MEMBERSHIP_BADGE[r.membership_state] ?? r.membership_state}${dday(r)}</span>` : ""}</td>
+        <td>${r.membership_state ? `<span class="badge plus">${MEMBERSHIP_BADGE[r.membership_state] ?? r.membership_state}${r.membership_state === "subscribed" && SUBSCRIPTION_PLAN(r.subscription?.product_id) ? ` ${SUBSCRIPTION_PLAN(r.subscription.product_id)}` : ""}${dday(r)}</span>` : ""}</td>
         <td title="${r.lastActive ?? ""}">${fmtWhen(r.lastActive)}</td>
         <td title="${r.connected_at}">${fmtDate(r.connected_at)}</td>
         <td>${r.gapHours ? `${+r.gapHours.toFixed(1)}h` : "—"}</td>
+        <td>${activeCell(r)}</td><td>${widgetCell(r)}</td>
         <td>${fmtInt(r.events_14d)}</td><td>${fmtInt(r.notes_14d)}</td><td>${fmtInt(r.ideas_14d)}</td>
         <td class="needs">${needs.map((n) => `<span class="need ${n.level}">${n.label}</span>`).join("")}${more > 0 ? `<span class="muted">+${more}</span>` : ""}</td></tr>
-        ${openCouple === r.couple_id ? `<tr class="couple-detail"><td colspan="10">${coupleDetailHtml(r)}</td></tr>` : ""}`;
+        ${openCouple === r.couple_id ? `<tr class="couple-detail"><td colspan="12">${coupleDetailHtml(r)}</td></tr>` : ""}`;
     }).join("")}</tbody></table>` : `<div class="empty">해당하는 커플이 없어요.</div>`;
 
   const triggerSort = (th) => {
@@ -827,7 +893,81 @@ function renderCouples(data) {
     tr.onclick = toggle;
     tr.onkeydown = onKey(toggle);
   });
+  renderCoupleWidgets(rows);
   renderUnpaired(data);
+}
+
+// 위젯을 둔 사람이 더 자주 들어오는지. 인과는 아니지만(원래 자주 쓰는 사람이 위젯도 올린다)
+// 위젯 권유를 더 밀지 판단할 첫 근거다. 같은 커플 행에서 세서 표와 숫자가 어긋나지 않는다.
+function renderCoupleWidgets(rows) {
+  const el = $("couple-widgets");
+  if (!rows.length) { el.innerHTML = `<div class="empty">연결된 커플이 아직 없어요.</div>`; return; }
+  const pairs = rows.filter((r) => r.members.length === 2);
+  const both = pairs.filter((r) => r.widgetUsers === 2).length;
+  const one = pairs.filter((r) => r.widgetUsers === 1).length;
+  const none = pairs.length - both - one;
+  const seg = (n, cls, label) => n ? `<div class="bar-fill${cls}" style="width:${(100 * n / pairs.length).toFixed(1)}%" title="${label} ${n}쌍"></div>` : "";
+  const members = rows.flatMap((r) => r.members);
+  const avg = (list, f) => list.length ? (list.reduce((n, x) => n + f(x), 0) / list.length).toFixed(1) : "—";
+  const withW = members.filter((m) => m.widgetsOn.length), withoutW = members.filter((m) => !m.widgetsOn.length);
+  const hasBoth = rows.some((r) => r.both_active_days_14 != null);
+  const byKind = {};
+  for (const m of members) for (const w of m.widgetRows) {
+    const k = (byKind[w.kind] ??= { on: 0, removed: 0, taps: 0 });
+    if (w.state === "on") k.on += 1;
+    if (w.state === "removed") k.removed += 1;
+    k.taps += Number(w.taps ?? 0);
+  }
+  const kinds = Object.entries(byKind).sort((a, b) => b[1].on - a[1].on);
+  el.innerHTML = `
+    <div class="bar-row reach" tabindex="0" aria-label="위젯: 둘 다 ${both}쌍, 한 명만 ${one}쌍, 없음 ${none}쌍">
+      <span>위젯 올린 커플</span>
+      <div class="bar-track stacked">${seg(both, "", "둘 다")}${seg(one, " light", "한 명만")}</div>
+      <span class="muted">${fmtInt(both + one)}/${fmtInt(pairs.length)}쌍</span></div>
+    <div class="legend"><span><i style="background:var(--tide)"></i>둘 다 ${fmtInt(both)}쌍</span>
+      <span><i style="background:color-mix(in srgb, var(--tide) 35%, transparent)"></i>한 명만 ${fmtInt(one)}쌍</span>
+      <span><i style="background:var(--subtle)"></i>없음 ${fmtInt(none)}쌍</span></div>
+    ${statusRow("14일 중 평균 접속일 — 위젯 있는 사람 · 없는 사람",
+      `${avg(withW, (m) => m.active_days_14.length)}일 (${fmtInt(withW.length)}명) · ${avg(withoutW, (m) => m.active_days_14.length)}일 (${fmtInt(withoutW.length)}명)`)}
+    ${hasBoth ? statusRow("같은 날 둘 다 들어온 날 (14일 평균) — 위젯 있는 커플 · 없는 커플",
+      `${avg(pairs.filter((r) => r.widgetUsers), (r) => Number(r.both_active_days_14 ?? 0))}일 · ${avg(pairs.filter((r) => !r.widgetUsers), (r) => Number(r.both_active_days_14 ?? 0))}일`) : ""}
+    ${kinds.length ? statusRow("종류별 — 지금 있는 사람 · 뺀 사람 · 누적 탭",
+      kinds.map(([k, v]) => `${widgetName(k)} ${fmtInt(v.on)}명${v.removed ? ` <span class="bad-text">뺌 ${fmtInt(v.removed)}</span>` : ""} <span class="muted">(탭 ${fmtInt(v.taps)})</span>`).join(" · ")) : ""}`;
+}
+
+// 위젯 하나에 한 줄: 종류·크기가 왼쪽, 지금 있는지·누르는지가 오른쪽.
+// "깔아두고 안 누르는 위젯"도 보는 위젯이다(모먼트·낙서는 누르지 않고 보는 게 목적) — 탭 0을 실패로 칠하지 않는다.
+function widgetRowsHtml(m) {
+  if (!m.widgetRows.length) return statusRow("위젯", `<span class="muted">올린 적 없음</span>`);
+  const stateHtml = (w) => w.state === "on" ? `<span class="ok-text">${w.stateLabel}</span>`
+    : w.state === "removed" ? `<span class="bad-text" title="마지막 확인 ${w.last_seen_at}">${w.stateLabel}</span>`
+    : `<span class="muted">${w.stateLabel}</span>`;
+  return statusRow("위젯", m.widgetsOn.length ? `${fmtInt(m.widgetsOn.length)}종 있음` : `<span class="muted">지금 없음</span>`) +
+    m.widgetRows.map((w) => `<div class="status-row widget-line"><span>${widgetName(w.kind)}
+        <span class="muted">${(w.families ?? []).map((f) => WIDGET_FAMILIES[f] ?? esc(f)).join(" · ")}</span></span>
+      <span class="muted">${stateHtml(w)}${w.first_seen_at ? ` · ${fmtDate(w.first_seen_at)}부터` : ""} · 탭 ${fmtInt(w.taps)}${w.last_tap_at ? ` <span title="${w.last_tap_at}">(${relTime(w.last_tap_at)})</span>` : ""}</span></div>`).join("");
+}
+
+// 온보딩 버전은 그 뒤 업데이트를 모른다. 푸시 토큰이 실행마다 싣는 버전(1.0.7+)이 있으면 그게 지금 앱이다.
+function appVersionHtml(m) {
+  if (m.app_version_live) return `<span title="${m.app_version_seen_at ?? ""}">${esc(m.app_version_live)}</span>`;
+  if (m.app_version_seen_at) return `<span title="토큰은 있는데 버전이 비어 있음 — 1.0.7 전 앱">1.0.6 이하</span>`;
+  if (!("app_version_live" in m)) return esc(m.app_version ?? "—");
+  return `${esc(m.app_version ?? "—")} <span class="muted">(가입 때)</span>`;
+}
+
+const SUBSCRIPTION_STATUS = {
+  active: "결제 중", grace_period: "결제 유예", billing_retry: "결제 재시도", expired: "만료", revoked: "환불",
+};
+function subscriptionRow(r) {
+  const s = r.subscription;
+  if (!s) return "";
+  const plan = SUBSCRIPTION_PLAN(s.product_id);
+  const renew = ["active", "grace_period", "billing_retry"].includes(s.status)
+    ? (s.will_renew ? ` · <span class="ok-text">자동 갱신</span>` : ` · <span class="bad-text">갱신 꺼짐</span>`) : "";
+  return statusRow("구독", `${plan ? `${plan} 구독 · ` : ""}${SUBSCRIPTION_STATUS[s.status] ?? esc(s.status)}${renew}` +
+    `${s.expires_at ? ` · <span title="${s.expires_at}">${new Date(s.expires_at).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" })}까지</span>` : ""}` +
+    `${s.environment && s.environment !== "Production" ? ` <span class="muted">(샌드박스)</span>` : ""}`);
 }
 
 function coupleDetailHtml(r) {
@@ -846,12 +986,13 @@ function coupleDetailHtml(r) {
       <span class="muted">${esc(m.city ?? "")}${m.country_code ? ` · ${countryName(m.country_code)}` : ""} · 지금 ${localNow(m.utc_offset_min)}</span></div>
     ${statusRow("마지막 접속", `<span title="${m.last_active_at ?? ""}">${fmtWhen(m.last_active_at)}</span>`)}
     ${statusRow("마지막으로 뭔가 만든 때", `<span title="${m.last_action_at ?? ""}">${fmtWhen(m.last_action_at)}</span>`)}
-    ${statusRow("14일 접속", strip(m.active_days_14))}
-    ${statusRow("14일 만든 것", `일정 ${fmtInt(m.events_14d)} · 쪽지 ${fmtInt(m.notes_14d)} · 답장 ${fmtInt(m.replies_14d)} · 버킷 ${fmtInt(m.ideas_14d)}`)}
+    ${statusRow("14일 접속", strip(m.active_days_14) + (m.active_days_30 != null ? ` <span class="muted">· 30일 ${fmtInt(m.active_days_30)}일</span>` : ""))}
+    ${statusRow("14일 만든 것", `일정 ${fmtInt(m.events_14d)} · 쪽지 ${fmtInt(m.notes_14d)}${m.drawings_14d != null ? ` <span class="muted">(낙서 ${fmtInt(m.drawings_14d)})</span>` : ""} · 답장 ${fmtInt(m.replies_14d)} · 버킷 ${fmtInt(m.ideas_14d)}`)}
+    ${m.moment ? statusRow("모먼트", `${fmtInt(m.moment.uploads)}번 올림 · 마지막 <span title="${m.moment.captured_at}">${fmtWhen(m.moment.captured_at)}</span>`) : ""}
     ${statusRow("알림", yes(m.push, "받음", "토큰 없음"))}
     ${statusRow("캘린더 연동", [m.apple_calendar && "Apple", m.google_calendar && "Google"].filter(Boolean).join(" · ") || `<span class="muted">없음</span>`)}
-    ${statusRow("위젯", m.widgets.length ? m.widgets.map((k) => WIDGET_NAMES[k] ?? esc(k)).join(" · ") : `<span class="muted">없음</span>`)}
-    ${statusRow("가입 · 앱 버전", `${fmtDate(m.joined_at)} · ${esc(m.app_version ?? "—")}`)}
+    ${m.widget_detail ? widgetRowsHtml(m) : statusRow("위젯", m.widgets.length ? m.widgets.map(widgetName).join(" · ") : `<span class="muted">없음</span>`)}
+    ${statusRow("가입 · 앱 버전", `${fmtDate(m.joined_at)} · ${appVersionHtml(m)}`)}
   </div>`;
   const cal = r.calendar, notes = r.notes, bucket = r.bucket;
   const pct = (a, b) => Number(b) ? `${Math.round(100 * Number(a) / Number(b))}%` : "—";
@@ -877,7 +1018,9 @@ function coupleDetailHtml(r) {
         ${statusRow("연결", fmtDate(r.connected_at))}
         ${statusRow("기념일", r.anniversary_date ? esc(r.anniversary_date) : `<span class="muted">없음</span>`)}
         ${statusRow("시차", r.gapHours ? `${+r.gapHours.toFixed(1)}시간` : "같은 시간대")}
-        ${Number(r.moments) ? statusRow("모먼트", fmtInt(r.moments)) : ""}</div>
+        ${r.both_active_days_14 != null ? statusRow("같은 날 둘 다 들어옴 (14일)", `${fmtInt(r.both_active_days_14)}일`) : ""}
+        ${subscriptionRow(r)}
+        ${Number(r.moments) ? statusRow("모먼트", `${fmtInt(r.moments)}명이 올려 둠`) : ""}</div>
     </div></div>`;
 }
 
@@ -885,6 +1028,7 @@ function coupleDetailHtml(r) {
 function renderCouplesLegacy(data) {
   const rows = data.couple_activity;
   $("couple-needs").innerHTML = "";
+  missingKey($("couple-widgets"));
   if (!rows) { missingKey($("couple-table")); missingKey($("unpaired")); return; }
   $("couple-table").innerHTML = rows.length ? `<table>
     <thead><tr><th>커플</th><th>상태</th><th>마지막 접속</th><th>연결</th><th>일정</th><th>쪽지</th><th>버킷</th></tr></thead>
@@ -957,15 +1101,21 @@ function renderUsage(data) {
 
   const widgets = u.widgets ?? [];
   const maxW = Math.max(...widgets.map((w) => Number(w.installed_users)), 1);
-  $("usage-widgets").innerHTML = widgets.length ? widgets.map((w) =>
+  // 0133: 사람 수만으로는 커플 앱에서 위젯이 얼마나 퍼졌는지 모른다 — 커플 단위 도달을 위에 둔다.
+  const wr = u.widget_reach;
+  const reachHtml = wr ? reach(wr.couples_any, "위젯 올린 커플 (한 명 이상)") + reach(wr.couples_both, "둘 다 올린 커플") : "";
+  $("usage-widgets").innerHTML = reachHtml + (widgets.length ? widgets.map((w) =>
     `<div class="bar-row" tabindex="0" aria-label="${WIDGET_NAMES[w.kind] ?? w.kind}: ${w.installed_users}명">
       <span>${WIDGET_NAMES[w.kind] ?? esc(w.kind)}</span>
       <div class="bar-track"><div class="bar-fill" style="width:${(100 * w.installed_users / maxW).toFixed(1)}%"></div></div>
       <span class="muted">${fmtInt(w.installed_users)}명 · 탭 ${fmtInt(w.taps_14d)}</span></div>`).join("") +
-    `<div class="muted hint">14일 안에 홈 화면에 올라가 있던 사람 수와 그 위젯을 눌러 앱을 연 횟수.</div>`
-    : `<div class="empty">14일간 위젯 기록 없음</div>`;
-  if (Number(u.moments?.total)) {
-    $("usage-widgets").innerHTML += statusRow("모먼트", `${fmtInt(u.moments.total)}장 · ${fmtInt(u.moments.couples)}쌍`);
+    `<div class="muted hint">14일 안에 홈 화면에 올라가 있던 사람 수와, 14일 안에 그 위젯을 누른 사람들의 누적 탭 수.</div>`
+    : `<div class="empty">14일간 위젯 기록 없음</div>`);
+  const mo = u.moments;
+  if (Number(mo?.total)) {
+    // 모먼트는 사람마다 한 장을 갈아 끼운다 — 장 수는 "올려 둔 사람", uploads가 실제로 찍어 올린 횟수다.
+    $("usage-widgets").innerHTML += statusRow("모먼트", `${fmtInt(mo.total)}명이 올려 둠 · ${fmtInt(mo.couples)}쌍` +
+      (mo.uploads != null ? ` · 누적 ${fmtInt(mo.uploads)}번 · 7일 안에 바꾼 사람 ${fmtInt(mo.updated_7d)}명` : ""));
   }
   renderHours(data.activity_hours);
 }
