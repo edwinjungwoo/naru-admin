@@ -3,117 +3,141 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>나루 어드민</title>
+<title>Naru 관리자</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<h1>나루 어드민</h1>
+<h1>Naru 관리자 대시보드</h1>
 
 <section id="login" class="card">
-  <div class="muted">공유 비밀번호를 입력하면 들어갑니다.</div>
+  <div class="muted">관리자 공유 비밀번호를 입력하세요.</div>
   <input id="password" type="password" placeholder="비밀번호" autocomplete="current-password">
-  <button id="enter">들어가기</button>
+  <button id="enter">로그인</button>
   <div id="login-error" class="error"></div>
 </section>
 
 <section id="dashboard">
   <nav class="tabbar" role="tablist">
-    <button class="tab" role="tab" data-tab="summary">요약</button>
+    <button class="tab" role="tab" data-tab="summary">개요</button>
     <button class="tab" role="tab" data-tab="couples">커플</button>
-    <button class="tab" role="tab" data-tab="usage">사용</button>
-    <button class="tab" role="tab" data-tab="trends">추세</button>
-    <button class="tab" role="tab" data-tab="revenue">수익</button>
-    <button class="tab" role="tab" data-tab="ops">운영<span id="ops-count" class="tab-count" hidden></span></button>
+    <button class="tab" role="tab" data-tab="usage">기능 사용</button>
+    <button class="tab" role="tab" data-tab="trends">성장</button>
+    <button class="tab" role="tab" data-tab="revenue">매출</button>
+    <button class="tab" role="tab" data-tab="ops">시스템<span id="ops-count" class="tab-count" hidden></span></button>
     <span class="tab-meta"><span id="generated-at"></span>
       <button id="reload" class="quiet">새로고침</button>
       <button id="signout" class="quiet">로그아웃</button></span>
   </nav>
 
   <div id="panel-summary" class="panel" role="tabpanel">
-    <h2>확인할 것</h2>
-    <div class="card" id="attention"></div>
-    <h2>오늘</h2>
+    <h2>핵심 지표</h2>
     <div class="tiles" id="summary-tiles"></div>
-    <h2>최근 30일 DAU</h2>
+    <div class="muted hint">어제까지 다 찬 7일(UTC)을 직전 7일과 비교합니다. '두 사람 모두 접속한 커플'만 오늘을 포함한 최근 7일 기준입니다.</div>
+    <div class="card versions-strip" id="summary-versions"></div>
+    <div id="promotions-wrap" hidden>
+      <h2>행사</h2>
+      <div class="card" id="promotions"></div>
+    </div>
+    <h2>조치가 필요한 항목</h2>
+    <div class="card" id="attention"></div>
+    <h2>커플 여정 <span class="muted" style="font-weight:400">— 연결한 커플이 어디까지 가고 어디서 멈추나</span></h2>
+    <div class="card" id="eco-journey"></div>
+    <h2>멤버십 × 접속 <span class="muted" style="font-weight:400">— 지금 연결된 커플</span></h2>
+    <div class="card scroll" id="eco-matrix"></div>
+    <h2>커플 맥박 <span class="muted" style="font-weight:400">— 한 줄이 한 커플, 한 칸이 하루</span></h2>
+    <div class="card" id="eco-pulse"></div>
+    <h2>기능과 함께 접속 <span class="muted" style="font-weight:400">— 어떤 기능 곁에 붙어 있는 커플이 모이나</span></h2>
+    <div class="card" id="eco-features"></div>
+    <h2>일간 활성 사용자 (DAU · 최근 30일)</h2>
     <div class="card" id="summary-spark"></div>
-    <h2>멤버십</h2>
-    <div class="card" id="summary-membership"></div>
   </div>
 
   <div id="panel-couples" class="panel" role="tabpanel" hidden>
-    <h2>커플에게 필요한 것</h2>
+    <h2>커플 세그먼트</h2>
     <div class="card" id="couple-needs"></div>
-    <h2>위젯과 같이 쓰기</h2>
+    <h2>위젯 사용 현황</h2>
     <div class="card" id="couple-widgets"></div>
-    <div class="muted hint">"있음"은 14일 안에 홈·잠금 화면에서 확인된 위젯입니다. 설치 목록은 앱을 열 때 하루 한 번 올라와서, 마지막 확인 뒤로 사흘 넘게 앱을 열었는데 안 보이면 "뺀 듯"으로 셉니다. 탭은 누적입니다.</div>
-    <h2>커플별 활동 (14일)</h2>
+    <div class="muted hint">'사용 중'은 최근 14일 내 홈·잠금 화면에서 확인된 위젯입니다. 설치 목록은 앱 실행 시 하루 한 번 갱신되며, 마지막 확인 후 3일 넘게 앱을 실행했는데 보이지 않으면 '제거 추정'으로 분류합니다. 탭 수는 누적값입니다.</div>
+    <h2>커플별 활동 (최근 14일)</h2>
     <div class="card scroll" id="couple-table"></div>
-    <div class="muted hint">줄을 누르면 두 사람 각각의 접속·알림·연동·위젯과 탭별 사용을 펼쳐 봅니다. 시각은 이 화면을 보는 기기 기준입니다.</div>
-    <h2>미연결 계정</h2>
+    <div class="muted hint">행을 선택하면 두 사람의 접속·알림·캘린더 연동·위젯 현황과 탭별 사용량을 볼 수 있습니다. 시각은 이 화면을 보는 기기의 시간대 기준입니다.</div>
+    <h2>파트너 미연결 계정</h2>
     <div class="card" id="unpaired"></div>
-    <h2>나라별 사용자</h2>
+    <h2>국가별 사용자</h2>
     <div class="card" id="countries"></div>
-    <div class="muted hint">심사용 데모 계정은 뺐습니다. 나라는 가입 때 고른 도시의 국가 코드 기준입니다.</div>
+    <div class="muted hint">심사용 데모 계정은 제외했습니다. 국가는 가입 시 선택한 도시 기준입니다.</div>
   </div>
 
   <div id="panel-usage" class="panel" role="tabpanel" hidden>
-    <div class="muted hint" style="margin-top:12px">화면을 연 기록은 없어서, 탭마다 남은 흔적(만든 일정·쪽지·버킷, 위젯 설치·탭)으로 셉니다.</div>
-    <h2>홈 · 접속</h2>
+    <div class="muted hint" style="margin-top:12px">화면 조회 로그는 수집하지 않으므로, 기능별로 남은 데이터(생성한 일정·쪽지·버킷, 위젯 설치·탭)로 사용량을 산출합니다.</div>
+    <h2>접속</h2>
     <div class="card" id="usage-home"></div>
-    <h2>캘린더 탭</h2>
+    <h2>캘린더</h2>
     <div class="card" id="usage-calendar"></div>
-    <h2>쪽지 탭</h2>
+    <h2>쪽지</h2>
     <div class="card" id="usage-notes"></div>
-    <h2>버킷 탭</h2>
+    <h2>버킷리스트</h2>
     <div class="card" id="usage-bucket"></div>
     <h2>위젯</h2>
     <div class="card" id="usage-widgets"></div>
-    <h2>언제 쓰나 (시간대)</h2>
+    <h2>시간대별 사용 (현지 시각)</h2>
     <div class="card scroll" id="usage-hours"></div>
   </div>
 
   <div id="panel-trends" class="panel" role="tabpanel" hidden>
-    <h2>가입과 탈퇴 (60일)</h2>
+    <h2>신규 가입 · 탈퇴 (최근 60일)</h2>
     <div class="card" id="signups"></div>
-    <h2>최근 탈퇴 (30일)</h2>
+    <h2>국가별 신규 가입 (최근 14일)</h2>
+    <div class="card scroll" id="signups-country"></div>
+    <h2>탈퇴 분석 (최근 30일)</h2>
     <div class="card" id="deletions"></div>
-    <h2>최근 60일 DAU</h2>
+    <h2>일간 활성 사용자 (DAU · 최근 60일)</h2>
     <div class="card" id="dau"></div>
-    <h2>기능별 주간 사용량 (12주)</h2>
+    <h2>기능별 주간 사용량 (최근 12주)</h2>
     <div class="card" id="feature-usage"></div>
-    <h2>주간 코호트 리텐션 (%)</h2>
+    <h2>주간 리텐션 (가입 코호트, %)</h2>
     <div class="card scroll" id="retention"></div>
-    <h2>주간 활성화율</h2>
+    <h2>연결 후 잔존 (주간 연결 코호트, 커플)</h2>
+    <div class="card scroll" id="survival"></div>
+    <h2>주간 활성화율 (가입 코호트)</h2>
     <div class="card scroll" id="activation"></div>
-    <h2>활성화 퍼널 (출시 9/15 이후 가입자, 사람 수)</h2>
+    <h2>활성화 퍼널 (9/15 출시 이후 가입자 · 명)</h2>
     <div class="card" id="milestones"></div>
-    <div class="muted hint">앱이 보낸 기록이 아니라 남은 흔적으로 셉니다 — 쪽지가 있으면 쪽지를 쓴 것. 계측이 멈춰도 이 숫자는 멈추지 않습니다.</div>
-    <h2>화면 단계 (앱 계측)</h2>
+    <div class="muted hint">앱 이벤트가 아닌 실제 데이터로 집계합니다(예: 쪽지가 있으면 '첫 쪽지' 도달). 이벤트 수집이 중단돼도 이 값은 정확합니다.</div>
+    <h2>온보딩 단계별 도달 (앱 이벤트 · 명)</h2>
     <div class="card" id="funnel"></div>
-    <div class="muted hint">화면을 봤는지·권한 요청을 미뤘는지처럼 흔적이 안 남는 단계입니다. 수집이 멈춘 기간은 운영 탭의 데이터 수집 카드가 알려줍니다.</div>
-    <h2>초대·위젯 권유 (14일, 사람 수)</h2>
+    <div class="muted hint">화면 조회·권한 요청 보류처럼 데이터로 남지 않는 단계를 앱 이벤트로 집계합니다. 수집 중단 여부는 시스템 탭 '데이터 수집 상태'에서 확인하세요.</div>
+    <h2>초대 · 위젯 안내 반응 (최근 14일 · 명)</h2>
     <div class="card" id="nudges"></div>
   </div>
 
   <div id="panel-revenue" class="panel" role="tabpanel" hidden>
-    <h2>결제 상태 (30일)</h2>
+    <h2>매출 요약</h2>
+    <div class="card" id="revenue-summary"></div>
+    <h2>주별 결제액 (최근 12주)</h2>
+    <div class="card" id="revenue-weekly"></div>
+    <h2>어디서 · 무엇으로</h2>
+    <div class="card" id="revenue-breakdown"></div>
+    <h2>최근 거래</h2>
+    <div class="card scroll" id="revenue-list"></div>
+    <h2>결제 정합성 (최근 30일)</h2>
     <div class="card" id="payment-detail"></div>
-    <h2>멤버십 분포</h2>
+    <h2>멤버십 분포 (커플)</h2>
     <div class="card" id="membership-dist"></div>
-    <h2>관계별 멤버십</h2>
+    <h2>커플별 멤버십</h2>
     <div class="card scroll" id="membership-table"></div>
-    <h2>결제 퍼널</h2>
+    <h2>결제 퍼널 <span class="muted" style="font-weight:400">(전체 기간 · 명)</span></h2>
     <div class="card" id="paywall"></div>
   </div>
 
   <div id="panel-ops" class="panel" role="tabpanel" hidden>
-    <h2>데이터 수집</h2>
+    <h2>데이터 수집 상태</h2>
     <div class="card" id="pipeline-detail"></div>
-    <div class="muted hint">앱이 보내는 계측이 3일 넘게 안 들어오면 멈춘 것으로 봅니다. 결제 테이블은 결제가 없는 날이 정상이라 여기서 판정하지 않고 수익 탭의 결제 상태가 봅니다.</div>
+    <div class="muted hint">앱 이벤트가 3일 넘게 수신되지 않으면 수집 중단으로 판정합니다. 결제 테이블은 결제가 없는 날이 정상이므로 여기서 판정하지 않고, 매출 탭 '결제 정합성'에서 확인합니다.</div>
     <h2>예약 작업 (pg_cron)</h2>
     <div class="card" id="cron"></div>
-    <div class="muted hint">"성공"은 엣지 함수 호출을 큐에 넣었다는 뜻까지입니다. 함수가 실제로 뭐라고 답했는지는 아래 외부 호출이 봅니다.</div>
-    <h2>외부 호출 응답 (최근 6시간)</h2>
+    <div class="muted hint">'성공'은 엣지 함수 호출을 대기열에 넣었다는 의미입니다. 실제 응답 결과는 아래 '엣지 함수 응답'에서 확인하세요.</div>
+    <h2>엣지 함수 응답 (최근 6시간)</h2>
     <div class="card" id="http"></div>
     <h2>Google 캘린더 연동</h2>
     <div class="card" id="gcal"></div>
@@ -121,11 +145,11 @@
     <div class="card" id="push"></div>
     <h2>공휴일 커버리지</h2>
     <div class="card" id="holidays"></div>
-    <h2>저장 용량</h2>
+    <h2>저장 공간</h2>
     <div class="card" id="storage"></div>
-    <h2>앱 버전</h2>
+    <h2>앱 버전 분포</h2>
     <div class="card" id="versions"></div>
-    <div class="muted hint">위는 새로 들어온 사람이 어떤 빌드로 온보딩했는지(스토어 반영 확인), 아래는 기존 사용자가 지금 어떤 빌드를 쓰는지입니다. 아래는 1.0.7부터 푸시 토큰에 실리는 버전이라, 토큰은 있는데 버전이 비어 있으면 1.0.6 이하로 셉니다.</div>
+    <div class="muted hint">위: 신규 사용자가 온보딩한 빌드(스토어 반영 확인). 아래: 기존 사용자가 현재 사용 중인 빌드. 현재 빌드는 1.0.7부터 푸시 토큰에 기록되므로, 버전이 비어 있으면 1.0.6 이하로 분류합니다.</div>
     <h2>사용자 피드백</h2>
     <div class="card" id="feedback"></div>
   </div>
