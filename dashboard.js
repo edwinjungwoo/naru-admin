@@ -22,12 +22,30 @@ const KOREAN_STEP_NAMES = {
   purchase_succeeded: "결제 성공", purchase_cancelled: "결제 취소", purchase_failed: "결제 실패",
   trial_ended_paywall_continued_free: "체험 종료 → 무료로 계속", trial_ended_paywall_left_app: "체험 종료 페이월에서 앱 떠남",
   paywall_products_unavailable: "상품 못 불러옴",
+  // 페이월 출처(analytics.paywall_sources, 0156)
+  paywall_opened_from_settings: "페이월 열람 · 설정", purchase_succeeded_from_settings: "결제 성공 · 설정",
+  paywall_opened_from_free_banner: "페이월 열람 · 무료 배너", purchase_succeeded_from_free_banner: "결제 성공 · 무료 배너",
+  paywall_opened_from_trial_banner: "페이월 열람 · 체험 막판 배너", purchase_succeeded_from_trial_banner: "결제 성공 · 체험 막판 배너",
+  paywall_opened_from_midpoint: "페이월 열람 · D-3 카드", purchase_succeeded_from_midpoint: "결제 성공 · D-3 카드",
+  paywall_opened_from_trial_end: "페이월 열람 · 체험 종료 화면", purchase_succeeded_from_trial_end: "결제 성공 · 체험 종료 화면",
+  paywall_opened_from_widget: "페이월 열람 · 잠긴 위젯", purchase_succeeded_from_widget: "결제 성공 · 잠긴 위젯",
+  paywall_opened_from_moment: "페이월 열람 · 모먼트 자물쇠", purchase_succeeded_from_moment: "결제 성공 · 모먼트 자물쇠",
+  paywall_opened_from_shared_schedule: "페이월 열람 · 공유 일정 자물쇠", purchase_succeeded_from_shared_schedule: "결제 성공 · 공유 일정 자물쇠",
+  paywall_opened_from_calendar_sync: "페이월 열람 · 캘린더 연동 자물쇠", purchase_succeeded_from_calendar_sync: "결제 성공 · 캘린더 연동 자물쇠",
+  paywall_opened_from_partner_updates: "페이월 열람 · 잠긴 알림 설정", purchase_succeeded_from_partner_updates: "결제 성공 · 잠긴 알림 설정",
+  paywall_opened_from_avatar: "페이월 열람 · 캐릭터 소품", purchase_succeeded_from_avatar: "결제 성공 · 캐릭터 소품",
+  paywall_opened_from_automations: "페이월 열람 · 자동화", purchase_succeeded_from_automations: "결제 성공 · 자동화",
+  paywall_opened_from_bucket_limit: "페이월 열람 · 버킷 한도", purchase_succeeded_from_bucket_limit: "결제 성공 · 버킷 한도",
   // funnel_steps 밖의 이벤트(event_counts_14d로만 온다)
   partner_invite_share_completed: "초대 공유 완료", partner_invite_share_cancelled: "초대 공유 취소",
   accept_invite_sheet_opened: "초대 코드 입력 화면 진입",
   invitee_entry_chosen: "첫 화면 '코드 받았어요'", invitee_paste_card_shown: "붙여넣기 카드 봄",
   invitee_code_pasted: "코드 붙여넣음", invitee_switched_to_inviter: "받는 화면 → 내가 초대",
   widget_nudge_viewed: "위젯 안내 노출", widget_nudge_opened: "위젯 안내 열람", widget_nudge_dismissed: "위젯 안내 닫음",
+  widget_nudge_partner_viewed: "위젯 안내 노출 · 상대가 올린 뒤",
+  partner_invite_qr_shown: "초대 QR 보여 줌", invite_accept_failed_invalid: "초대 코드 틀림·만료",
+  first_week_checklist_viewed: "첫 주 체크리스트 노출", first_week_checklist_item_tapped: "첫 주 체크리스트 항목 누름",
+  first_week_checklist_dismissed: "첫 주 체크리스트 닫음",
 };
 
 // 화면이 켜져 있는 동안 OS가 라이트/다크를 바꾸면 CSS 변수는 즉시 따라가지만,
@@ -272,8 +290,9 @@ const FEATURE_SERIES = [
   ["wall_notes", "쪽지", "var(--tide)"],
   ["wall_note_replies", "답장", "var(--deep-water)"],
   ["meet_ideas", "버킷", "var(--series-idea)"],
-  ["widget_taps", "위젯 탭", "var(--secondary-ink)"],
 ];
+// 위젯 탭은 뺐다 — 서버가 "마지막 탭이 그 주인 사람×위젯 수"를 세서, 지난주 값이 시간이 지나면 줄어든다.
+// 누적 탭은 사용 탭 '위젯'에 있다.
 
 function renderFeatureUsage(rows) {
   if (!rows) { missingKey($("feature-usage")); return; }
@@ -287,17 +306,23 @@ function renderFeatureUsage(rows) {
   const plotW = w - padL - padR, plotH = h - padT - padB;
   const x = (i) => padL + i * plotW / Math.max(weeks.length - 1, 1);
   const y = (v) => padT + plotH - v * plotH / max;
+  // 마지막 주가 아직 진행 중이면 그 구간은 점선 — 다 찬 주처럼 그리면 매주 급락처럼 보였다(DAU 그래프와 같은 규칙).
+  const partial = weeks.length > 1 && Date.now() < new Date(weeks[weeks.length - 1] + "T00:00:00Z").getTime() + 7 * DAY_MS;
+  const solidN = partial ? weeks.length - 1 : weeks.length;
+  const line = (vals, from) => vals.map((v, i) => `${i ? "L" : "M"}${x(from + i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
   const paths = series.map((s) =>
-    `<path d="${s.values.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ")}"
-       fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round"/>`).join("");
+    `<path d="${line(s.values.slice(0, solidN), 0)}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round"/>` +
+    (partial ? `<path d="${line(s.values.slice(solidN - 1), solidN - 1)}" fill="none" stroke="${s.color}" stroke-width="2" stroke-dasharray="4 4"/>` : "")).join("");
   const grid = [...new Set([0, Math.round(max / 2), max])].map((v) => `
     <line x1="${padL}" y1="${y(v).toFixed(1)}" x2="${w - padR}" y2="${y(v).toFixed(1)}" stroke="var(--line)"/>
     <text x="${padL - 8}" y="${y(v).toFixed(1)}" text-anchor="end" dominant-baseline="middle"
           fill="var(--secondary-ink)" font-size="11">${v}</text>`).join("");
   const fmtW = (d) => new Date(d + "T00:00:00Z").toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" });
   const tickIdx = [...new Set([0, Math.floor((weeks.length - 1) / 2), weeks.length - 1])];
+  // 양 끝 라벨을 가운데 정렬하면 오른쪽 끝이 그림 밖으로 잘린다.
+  const anchor = (i) => i === 0 ? "start" : i === weeks.length - 1 ? "end" : "middle";
   const xLabels = tickIdx.map((i) => `
-    <text x="${x(i).toFixed(1)}" y="${h - 30}" text-anchor="middle" fill="var(--secondary-ink)" font-size="11">${fmtW(weeks[i])}</text>`).join("");
+    <text x="${x(i).toFixed(1)}" y="${h - 30}" text-anchor="${anchor(i)}" fill="var(--secondary-ink)" font-size="11">${fmtW(weeks[i])}</text>`).join("");
   // 범례는 차트 아래 한 줄 — 5개면 옆 라벨은 겹친다.
   const legend = series.map((s) =>
     `<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px">
@@ -306,7 +331,7 @@ function renderFeatureUsage(rows) {
   $("feature-usage").innerHTML = `
     <svg viewBox="0 0 ${w} ${h - 20}" style="width:100%;height:auto;display:block" role="img"
          aria-label="기능별 주간 생성 수, 최근 ${weeks.length}주">${grid}${paths}${xLabels}</svg>
-    <div style="margin-top:8px">${legend}</div>`;
+    <div style="margin-top:8px">${legend}${partial ? `<span class="muted" style="font-size:12px">점선: 진행 중인 주</span>` : ""}</div>`;
 }
 
 // 앱이 보내는 계측만 신선도로 판정한다. 결제 원천은 결제가 없는 날이 정상이라, 같은 기준을
@@ -371,6 +396,8 @@ function cronIntervalMinutes(schedule) {
   if (everyMin && hour === "*") return Number(everyMin[1]);
   const everyHour = /^\*\/(\d+)$/.exec(hour);
   if (/^\d+$/.test(min) && everyHour) return Number(everyHour[1]) * 60;
+  // 매시 정각 몇 분(예: "10 * * * *") — 빠뜨리면 매시 도는 알림 크론 넷이 멈춰도 경고가 안 떴다.
+  if (/^\d+$/.test(min) && hour === "*") return 60;
   if (/^\d+$/.test(min) && /^\d+$/.test(hour)) return 1440;
   return null;
 }
@@ -395,6 +422,9 @@ const CRON_NAMES = {
   "purge-stale-testflight-applications": "TestFlight 신청 정리",
   "cron-run-log-cleanup": "cron 로그 정리",
   "hme-auto-recovery": "HME 계정 자동 복구",
+  "send-partner-inactive-reminder": "안 연 상대에게 한 번 알림",
+  // 행사가 끝나도 크론은 매시 돈다 — 50시간 창 밖이면 SQL 조건에서 호출 없이 끝난다(0142).
+  "send-moment-launch-push": "모먼트 재체험 공지 (행사 창 밖이면 호출 안 함)",
 };
 
 // 결정은 여기 한 곳에서 한다 — 카드마다 경고를 따로 띄우면 어디가 급한지 순서가 사라진다.
@@ -534,7 +564,8 @@ function renderOps(data) {
     const split = g.members != null;
     const stopped = Number(g.connections) - Number(g.members);
     $("gcal").innerHTML =
-      statusRow("연동 사용자", split
+      // 운영 점검용이라 테스트·심사 계정도 센다 — 사용 탭의 Google 수(실사용자만)와 다를 수 있다.
+      statusRow("연동 사용자 <span class=\"muted\">(테스트 계정 포함)</span>", split
         ? `${fmtInt(g.connections)} <span class="muted">· 멤버십 활성 ${fmtInt(g.members)}</span>` : fmtInt(g.connections)) +
       statusRow("최근 동기화", `<span title="${g.last_sync ?? ""}">${relTimeFine(g.last_sync)}</span>`) +
       statusRow("재인증 실패", fmtInt(g.reauth_failing), Number(g.reauth_failing) ? "warn" : "ok") +
@@ -606,7 +637,7 @@ function renderOps(data) {
         return `<div class="bar-row" tabindex="0" aria-label="${esc(label)}: ${v.users}명">
         <span class="mono">${esc(label)}</span>
         <div class="bar-track"><div class="bar-fill${v.app_version ? "" : " light"}" style="width:${(100 * v.users / max).toFixed(1)}%"></div></div>
-        <span class="muted" title="${v.last_seen}">${fmtInt(v.users)}명 · ${Math.round(100 * v.users / total)}%</span></div>`;
+        <span class="muted" title="${v.last_seen}">${fmtInt(v.users)}명 · ${total ? Math.round(100 * v.users / total) : 0}%</span></div>`;
       }).join("");
   }
 
@@ -650,11 +681,13 @@ function renderSignups(rows) {
   const axis = `<line x1="${padL}" y1="${zero.toFixed(1)}" x2="${w - padR}" y2="${zero.toFixed(1)}" stroke="var(--secondary-ink)" stroke-width="1"/>
     <text x="${padL - 8}" y="${(zero - up * scale).toFixed(1)}" text-anchor="end" dominant-baseline="hanging" fill="var(--secondary-ink)" font-size="11">${up}</text>
     <text x="${padL - 8}" y="${(zero + down * scale).toFixed(1)}" text-anchor="end" dominant-baseline="auto" fill="var(--secondary-ink)" font-size="11">${down}</text>`;
-  const sum = (k, n) => rows.slice(-n).reduce((s, r) => s + Number(r[k]), 0);
+  // 개요 타일처럼 어제까지 다 찬 날만 — 오늘 반나절을 넣으면 같은 화면 안에서 17명과 16명으로 갈렸다.
+  const done = rows.filter((r) => r.day < utcToday());
+  const sum = (k, n) => done.slice(-n).reduce((s, r) => s + Number(r[k]), 0);
   el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;display:block" role="img"
       aria-label="최근 60일 일별 가입(위)과 탈퇴(아래)">${axis}${bars}${ticks}</svg>
     <div class="legend"><span><i style="background:var(--tide)"></i>가입</span><span><i style="background:var(--error);opacity:.75"></i>탈퇴</span>
-      <span class="muted">7일 가입 ${fmtInt(sum("signups", 7))} · 탈퇴 ${fmtInt(sum("deletions", 7))} · 30일 가입 ${fmtInt(sum("signups", 30))} · 탈퇴 ${fmtInt(sum("deletions", 30))}</span></div>`;
+      <span class="muted">어제까지 7일 가입 ${fmtInt(sum("signups", 7))} · 탈퇴 ${fmtInt(sum("deletions", 7))} · 30일 가입 ${fmtInt(sum("signups", 30))} · 탈퇴 ${fmtInt(sum("deletions", 30))}</span></div>`;
 }
 
 function renderDeletions(rows) {
@@ -808,7 +841,7 @@ const NEED_RULES = [
   ["empty", "warn", "콘텐츠 없음", "연결 1일 경과 후에도 일정·쪽지·버킷 생성 없음 — 첫 사용 유도 필요",
     (c) => !c.calendar.events_total && !c.notes.notes_total && !c.bucket.ideas_total &&
       Date.now() - new Date(c.connected_at).getTime() > 86400000],
-  ["convert", "opp", "전환 후보", "체험 종료 3일 이내 · 최근 14일 생성 5건 초과",
+  ["convert", "opp", "전환 후보", "체험 종료 3일 이내 · 최근 14일 생성 5건 이상",
     (c) => (c.membership_state === "trial_active" || c.membership_state === "promo_trial") &&
       c.expiresInDays != null && c.expiresInDays <= 3 && c.made14 >= 5],
   ["paywall", "opp", "체험 종료 후 사용", "멤버십 없이 최근 7일 접속 — 페이월 노출 대상",
@@ -817,11 +850,12 @@ const NEED_RULES = [
     (c) => c.calendar.events_14d >= 8 && !c.members.some((m) => m.apple_calendar || m.google_calendar)],
   ["sync_only", "info", "연동 일정만 사용", "연동 일정은 있으나 앱에서 직접 만든 일정 없음",
     (c) => (Number(c.synced.apple_events) + Number(c.synced.google_events)) > 0 && !c.calendar.events_total],
-  ["unanswered", "info", "쪽지 무응답", "최근 14일 쪽지에 답장 없음",
-    (c) => c.notes.notes_14d > 0 && !c.notes.replied],
+  // notes.replied는 전체 기간 값이라 예전 답장 하나가 지금의 무응답을 가렸다. 14일 답장 수로 본다.
+  ["unanswered", "info", "쪽지 무응답", "최근 14일 쪽지는 있는데 두 사람 모두 14일 답장 없음",
+    (c) => c.notes.notes_14d > 0 && c.members.every((m) => !Number(m.replies_14d))],
   ["renew_off", "warn", "해지 예정", "자동 갱신 해제 — 만료일에 구독 종료",
     (c) => c.membership_state === "subscribed" && c.subscription?.will_renew === false],
-  ["widget", "info", "위젯 안내 대상", "두 사람 모두 최근 14일 중 5일 초과 접속 · 위젯 없음",
+  ["widget", "info", "위젯 안내 대상", "두 사람 모두 최근 14일 중 5일 이상 접속 · 위젯 없음",
     (c) => c.members.length === 2 && c.members.every((m) => m.active_days_14.length >= 5) &&
       c.members.every((m) => !m.widgetsOn.length)],
   ["widget_removed", "info", "위젯 제거", `위젯 설치 후 모두 제거 추정 — 마지막 확인 후 ${WIDGET_REMOVED_AFTER_DAYS}일 넘게 앱 실행`,
@@ -831,8 +865,21 @@ const NEED_RULES = [
 ];
 const NEED_ORDER = { bad: 0, warn: 1, opp: 2, info: 3 };
 
+// profiles.last_active_at은 앱이 1시간 간격으로, 프로필을 들고 있을 때만 남긴다 — 하트비트(user_active_days)보다
+// 늦게 남는 사람이 있어(11/2에 들어온 사람이 10/12로 보여 '이탈'로 떴다) 둘 중 늦은 쪽을 쓴다. 하트비트는 UTC
+// 날짜뿐이라 그날 0시로 잡는다(덜 최근 쪽으로 어림).
+function lastSeenAt(m) {
+  // active_days_30은 개수(숫자)라 날짜는 14일 목록에서만 읽는다.
+  const days = Array.isArray(m.active_days_14) ? [...m.active_days_14] : [];
+  const beat = days.length ? `${days.sort().pop()}T00:00:00Z` : null;
+  if (!beat) return m.last_active_at ?? null;
+  if (!m.last_active_at) return beat;
+  return ms(beat) > ms(m.last_active_at) ? beat : m.last_active_at;
+}
+
 function enrichCouple(c) {
-  const members = (c.members ?? []).map((m) => {
+  const members = (c.members ?? []).map((raw) => {
+    const m = { ...raw, last_active_at: lastSeenAt(raw) };
     const widgetRows = (m.widget_detail ?? []).map((w) => {
       const [state, stateLabel] = widgetState(w, m.last_active_at);
       return { ...w, state, stateLabel };
@@ -1010,7 +1057,7 @@ function renderCoupleWidgets(rows) {
       `${avg(withW, (m) => m.active_days_14.length)}일 (${fmtInt(withW.length)}명) · ${avg(withoutW, (m) => m.active_days_14.length)}일 (${fmtInt(withoutW.length)}명)`)}
     ${hasBoth ? statusRow("동시 접속일 (14일 평균) — 위젯 사용 커플 · 미사용 커플",
       `${avg(pairs.filter((r) => r.widgetUsers), (r) => Number(r.both_active_days_14 ?? 0))}일 · ${avg(pairs.filter((r) => !r.widgetUsers), (r) => Number(r.both_active_days_14 ?? 0))}일`) : ""}
-    ${kinds.length ? statusRow("위젯별 — 사용 중 · 제거 추정 · 누적 탭", kinds.map(widgetKindHtml).join(" · ")) : ""}`;
+    ${kinds.length ? statusRow("위젯별", kinds.map(widgetKindHtml).join(" · ")) : ""}`;
 }
 
 // 위젯 하나에 한 줄: 종류·크기가 왼쪽, 지금 있는지·누르는지가 오른쪽.
@@ -1262,8 +1309,11 @@ function renderRevenue(data) {
   const s = data.membership_summary, rows = data.membership_rows;
   if (!s || !rows) { missingKey($("membership-dist")); missingKey($("membership-table")); return; }
   const conv = paidConversion(s, rows);
+  // 평생 이용권 대부분은 베타·시드 선물이다. 한 줄로 두면 유료 커플이 실제보다 많아 보인다.
+  const lifetimePaid = rows.filter((r) => r.state === "lifetime" && r.lifetime_source === "store").length;
   const dist = [
-    ["평생 이용권", Number(s.lifetime)], ["체험 중", Number(s.trial_active)],
+    ["평생 이용권 (결제)", lifetimePaid], ["평생 이용권 (선물)", Math.max(Number(s.lifetime) - lifetimePaid, 0)],
+    ["체험 중", Number(s.trial_active)],
     ...(Number(s.promo_trial) ? [["재체험 중 (행사)", Number(s.promo_trial)]] : []),
     ["구독 중", Number(s.subscribed)], ["체험 종료 (미결제)", Number(s.trial_over)],
   ];
@@ -1284,7 +1334,7 @@ function renderRevenue(data) {
       <td>${esc(r.member_one)} · ${esc(r.member_two)}${r.connected ? "" : ` <span class="muted">(연결 해제)</span>`}</td>
       <td><span class="badge plus">${MEMBERSHIP_BADGE[r.state] ?? r.state}</span>${r.promo ? ` <span class="muted">${esc(PROMO_NAMES[r.promo] ?? r.promo)}</span>` : ""}</td>
       <td title="${r.expires_at ?? ""}">${r.expires_at ? dday(r.expires_at) : "—"}</td>
-      <td class="muted">${r.lifetime_source ? (LIFETIME_SOURCE[r.lifetime_source] ?? r.lifetime_source) : ""}</td>
+      <td class="muted">${r.lifetime_source ? (LIFETIME_SOURCE[r.lifetime_source] ?? r.lifetime_source) : r.state === "subscribed" ? "스토어 결제" : ""}</td>
     </tr>`;
   // 체험 종료(미결제)는 100쌍이 넘고 만료·출처 칸이 비어 있다. 다 펼쳐 두면 할 일이 있는 체험 중·
   // 구독·평생권이 그 밑에 묻힌다 — 접어 두고 숫자만 보인다.
@@ -1385,7 +1435,7 @@ function renderSummary(data) {
     const one = curPairs.filter((c) => c.members.filter((m) => seen(m, curWin)).length === 1).length;
     const pct = (n, d) => d ? Math.round(100 * n / d) : null;
     tiles.push(kpiTile("두 사람 모두 접속한 커플 <span class=\"muted\">(7일)</span>",
-      `${fmtInt(curBoth)}쌍 <small class="muted">/ ${fmtInt(curPairs.length)} · ${pct(curBoth, curPairs.length)}%</small>`,
+      `${fmtInt(curBoth)}쌍 <small class="muted">/ ${fmtInt(curPairs.length)}${curPairs.length ? ` · ${pct(curBoth, curPairs.length)}%` : ""}</small>`,
       change(pct(curBoth, curPairs.length), pct(prevBoth, prevPairs.length), { points: true }),
       [`한 명만 ${fmtInt(one)}쌍 · 둘 다 미접속 ${fmtInt(curPairs.length - curBoth - one)}쌍`]));
   }
@@ -1445,7 +1495,7 @@ function renderSummaryVersions(live) {
   const sorted = [...live].sort((a, b) => (b.app_version ?? "").localeCompare(a.app_version ?? "", undefined, { numeric: true }));
   const total = sorted.reduce((n, v) => n + Number(v.users), 0);
   el.innerHTML = `<span class="muted">현재 사용 버전</span> ` + sorted.map((v, i) =>
-    `<span class="${i === 0 ? "" : "muted"}">${esc(v.app_version ?? "1.0.6 이하")} <b>${Math.round(100 * v.users / total)}%</b></span>`).join(" · ") +
+    `<span class="${i === 0 ? "" : "muted"}">${esc(v.app_version ?? "1.0.6 이하")} <b>${total ? Math.round(100 * v.users / total) : 0}%</b></span>`).join(" · ") +
     ` <span class="muted">(최근 14일 실행 · 알림 허용 ${fmtInt(total)}명 · <a href="#ops">시스템 탭</a>)</span>`;
 }
 
@@ -1760,13 +1810,22 @@ function paidCoupleIDs(data) {
 
 // 연결한 커플이 어디까지 갔나. 8일이 지나야 '체험 이후에도 접속'을 판정할 수 있으므로
 // 출시 이후 연결해 8일 넘은 커플만 센다 — 진행 중인 커플이 뒤 단계를 깎아 먹지 않게.
+// 성장 탭 '연결 후 잔존'(connection_survival_weekly)과 같은 셈 — UTC 날짜로 연결 8일째 이후에 접속했나.
+const utcDayNum = (t) => Math.floor(t / DAY_MS);
+function lastJourneySeen(j, id, data) {
+  const beats = Object.keys(data.couple_pulse?.[id] ?? {}).sort();
+  const beat = beats.length ? ms(`${beats.pop()}T00:00:00Z`) : 0;
+  return Math.max(ms(j.last_active) ?? 0, beat);
+}
+
 function journeyStages(data) {
   const paid = paidCoupleIDs(data);
   return [
     ["connected", "연결", () => true, (j) => 0],
     ["content", "첫 기록", (j) => !!(j.first_event || j.first_note || j.first_drawing || j.first_idea),
       (j) => Math.min(...[j.first_event, j.first_note, j.first_drawing, j.first_idea].filter(Boolean).map(ms)) - ms(j.connected)],
-    ["both_back", "체험 이후에도 접속", (j) => ms(j.last_active) - ms(j.connected) > 8 * DAY_MS, () => null],
+    // 성장 탭 '연결 후 잔존'과 같은 답이 나오게 하트비트(맥박)도 본다 — profiles 값만 보면 81 vs 86으로 갈렸다.
+    ["both_back", "체험 이후에도 접속", (j, id) => utcDayNum(lastJourneySeen(j, id, data)) - utcDayNum(ms(j.connected)) >= 8, () => null],
     ["paywall", "페이월 조회", (j) => !!j.first_paywall, (j) => ms(j.first_paywall) - ms(j.connected)],
     ["paid", "결제", (j, id) => paid.has(id), (j) => j.purchased ? ms(j.purchased) - ms(j.connected) : null],
   ];
@@ -1777,7 +1836,7 @@ function renderJourneyFunnel(data) {
   const journey = data.couple_journey;
   if (!journey) { missingKey(el); return; }
   const cohort = Object.entries(journey).filter(([, j]) =>
-    j.connected && ms(j.connected) >= LAUNCH_AT && Date.now() - ms(j.connected) > 8 * DAY_MS);
+    j.connected && ms(j.connected) >= LAUNCH_AT && utcDayNum(Date.now()) - utcDayNum(ms(j.connected)) >= 8);
   if (!cohort.length) { el.innerHTML = `<div class="empty">판정할 커플이 아직 없습니다.</div>`; return; }
   const stages = journeyStages(data);
   let prevIDs = cohort.map(([id]) => id);
@@ -1816,7 +1875,7 @@ function renderJourneyFunnel(data) {
 
 const MEMBERSHIP_ROWS = [
   ["trial_active", "체험 중"], ["promo_trial", "재체험 중"], ["trial_over", "체험 종료"],
-  ["subscribed", "구독 중"], ["lifetime", "평생 이용권"],
+  ["subscribed", "구독 중"], ["lifetime", "평생 이용권 (선물 포함)"],
 ];
 const ACTIVITY_COLS = [
   ["both", "둘 다 접속", "최근 7일 두 사람 모두 접속"],
@@ -1824,10 +1883,12 @@ const ACTIVITY_COLS = [
   ["idle", "7~21일 미접속", "두 사람 모두 7~21일째 미접속"],
   ["gone", "이탈", "두 사람 모두 21일 넘게 미접속"],
 ];
-// 커플 탭의 상태(coupleStatus·휴면 규칙)와 같은 시계 — 각자의 last_active_at — 로 가른다. 하트비트의 UTC 날짜
-// 창과 섞으면 엿새 전에 들어온 커플이 '7~21일 미접속' 칸에 들어가고, 눌러 보면 커플 탭은 '활성'이라고 했다.
+// 바로 위 타일 "두 사람 모두 접속한 커플(7일)"과 같은 창 — 오늘을 넣은 UTC 7일의 하트비트 — 으로 가른다.
+// last_active_at만 보던 때는 한 화면에서 타일 22쌍·표 20쌍으로 갈렸다. 7일 밖은 하트비트까지 합친 마지막 접속
+// (enrichCouple)으로 나눈다 — 커플 탭의 휴면·이탈 판정과 같은 값이다.
 function activityClass(r) {
-  const seen = r.members.filter((m) => m.last_active_at && Date.now() - ms(m.last_active_at) <= 7 * DAY_MS).length;
+  const win = [utcDaysAgo(6), utcToday()];
+  const seen = r.members.filter((m) => (m.active_days_14 ?? []).some((d) => inWindow(d, win))).length;
   if (r.members.length === 2 && seen === 2) return "both";
   if (seen >= 1) return "one";
   return r.idleDays > 21 ? "gone" : "idle";
@@ -2042,14 +2103,16 @@ function renderRevenueAmounts(data) {
     ids.forEach((id) => $(id).innerHTML = `<div class="empty">결제액 기록이 아직 없습니다.</div>`);
     return;
   }
+  // 금액을 남기지 않는 기간(처리방침 시행 전)에는 ₩0이 "매출 없음"으로 읽힌다 — 모르는 값은 —로 둔다.
+  const krw = (v) => m.priced ? fmtKRW(v) : "—";
   const tile = (label, value, sub) => `<div class="tile"><span class="muted">${label}</span><b>${value}</b>${sub ? `<span class="muted" style="font-size:12px">${sub}</span>` : ""}</div>`;
   $("revenue-summary").innerHTML = `<div class="tiles">
-      ${tile("누적 결제액", fmtKRW(m.total), `${fmtInt(m.live.length)}건 · 결제자 ${fmtInt(m.payers)}`)}
-      ${tile("최근 30일", fmtKRW(m.last30), `${fmtInt(m.last30N)}건 · 직전 30일 ${fmtKRW(m.prev30)}`)}
-      ${tile("월 반복 매출 (MRR)", fmtKRW(m.mrr), `활성 구독 ${fmtInt(m.activeSubs)}건`)}
-      ${tile("평생 이용권", fmtKRW(m.lifetime), `${fmtInt(m.lifetimeN)}건`)}
-      ${tile("30일 내 갱신 예정", fmtKRW(m.renewSoon), "자동 갱신 켜진 구독")}
-      ${tile("환불", fmtKRW(m.refunded), `${fmtInt(m.refundedN)}건`)}
+      ${tile("누적 결제액", krw(m.total), `${fmtInt(m.live.length)}건 · 결제자 ${fmtInt(m.payers)}`)}
+      ${tile("최근 30일", krw(m.last30), `${fmtInt(m.last30N)}건 · 직전 30일 ${krw(m.prev30)}`)}
+      ${tile("월 반복 매출 (MRR)", krw(m.mrr), `활성 구독 ${fmtInt(m.activeSubs)}건`)}
+      ${tile("평생 이용권", krw(m.lifetime), `${fmtInt(m.lifetimeN)}건`)}
+      ${tile("30일 내 갱신 예정", krw(m.renewSoon), "자동 갱신 켜진 구독")}
+      ${tile("환불", krw(m.refunded), `${fmtInt(m.refundedN)}건`)}
     </div>
     <div class="muted hint">고객 결제액(세금 포함, 애플 수수료 전)을 고정 대략 환율로 원화 환산했습니다. 정산 금액은 App Store Connect가 원본입니다. 결제자는 구독(원 거래)·평생권 거래 단위입니다.</div>
     ${m.unpriced.length ? `<div class="muted hint">금액이 없는 결제 ${fmtInt(m.unpriced.length)}건은 위 합계에 들어 있지 않습니다 — 개인정보처리방침 개정이 시행되는 11/10 전까지는 금액·통화·스토어 국가를 남기지 않고, 시행 뒤 백필로 채웁니다.</div>` : ""}

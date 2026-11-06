@@ -42,7 +42,10 @@
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 4px; margin-right: 6px; vertical-align: 1px; }
   .dot.ok { background: var(--tide); }
   .dot.stale { background: var(--error); }
-  .status-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .status-row { display: flex; justify-content: space-between; gap: 16px; font-size: 13px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .status-row > span:last-child { text-align: right; }
+  /* 이름은 줄어들지 않게 — 값이 길면 "위/젯/별"처럼 이름이 한 글자씩 꺾였다. 긴 이름만 절반까지 차지하고 줄을 바꾼다. */
+  .status-row > span:first-child { flex: 0 0 auto; max-width: 55%; }
   .status-row:last-child { border-bottom: 0; }
   /* 숫자가 어디서 왔는지 카드 바로 밑에서 밝힌다 — 출처를 모르면 못 믿는다 */
   .hint { margin-top: 6px; font-size: 12px; line-height: 1.5; }
@@ -62,7 +65,9 @@
     display: block; font-size: 22px; margin-top: 2px; font-weight: 600;
     font-variant-numeric: proportional-nums; /* 큰 숫자는 고정폭이면 헐거워 보인다 */
   }
-  .bar-row { display: grid; grid-template-columns: 170px 1fr 76px; gap: 8px; align-items: center; font-size: 13px; margin: 8px 0; }
+  /* 값 칸은 내용만큼 — 76px 고정이면 "14명 · 제거 7 · 탭 656"이 두 줄로 꺾여 막대와 어긋난다. */
+  .bar-row { display: grid; grid-template-columns: 170px 1fr minmax(76px, max-content); gap: 8px; align-items: center; font-size: 13px; margin: 8px 0; }
+  .bar-row > :last-child { white-space: nowrap; }
   .bar-row:focus-visible { outline: 2px solid var(--tide); outline-offset: 2px; border-radius: 6px; }
   .bar-track { background: var(--subtle); border-radius: 4px; height: 14px; overflow: hidden; }
   /* 데이터 끝(오른쪽)만 4px 둥글리고 기준선(왼쪽)은 각지게 — 값이 자라나는 방향만 부드럽다 */
@@ -170,7 +175,9 @@
   .feedback a { color: var(--deep-water); }
   .feedback-body { margin-top: 4px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
   @media (max-width: 480px) {
-    .bar-row { grid-template-columns: 110px 1fr 76px; }
+    /* 폰 폭에서는 값이 내용 폭을 다 가져가면 막대가 사라진다 — 막대에 최소 폭을 주고 값은 줄을 바꾼다. */
+    .bar-row { grid-template-columns: 96px minmax(56px, 1fr) minmax(64px, max-content); }
+    .bar-row > :last-child { white-space: normal; max-width: 44vw; text-align: right; }
     .status-row { gap: 12px; }
     .status-row > span:last-child { text-align: right; }
   }
@@ -217,9 +224,10 @@
   @media (max-width: 640px) { .members, .tab-cards { grid-template-columns: 1fr; } }
   /* "60/113쌍 · 53%"는 76px 칸에서 두 줄로 꺾인다. */
   .bar-row.reach { margin-top: 0; grid-template-columns: 170px 1fr 120px; }
+  @media (max-width: 480px) { .bar-row.reach { grid-template-columns: 96px minmax(56px, 1fr) minmax(64px, max-content); } }
   table.hours { table-layout: fixed; min-width: 560px; }
   table.hours th { font-weight: 400; color: var(--secondary-ink); font-size: 11px; text-align: left; padding: 2px 0; }
-  table.hours th:first-child, table.hours td:first-child { width: 128px; }
+  table.hours th:first-child, table.hours td:first-child { width: 168px; }
   table.hours td.cell { padding: 0; height: 22px; border: 1px solid var(--canvas); border-radius: 3px; }
   table.hours td.peak, table.hours th:last-child { width: 40px; text-align: right; }
   /* 커플 표의 위젯 칸: 두 사람 것을 한 칸에 나란히. 칩 하나가 한 사람이다. */
@@ -243,7 +251,8 @@
   button.link { color: var(--deep-water); font-size: 12px; background: none; }
   button.link:hover { text-decoration: underline; }
 
-  .journey-funnel { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; align-items: end; }
+  /* 위로 맞춘다 — 아래로 맞추면 단계마다 설명 줄 수가 달라 막대 바닥이 어긋나고, 100%인 '연결'이 더 짧아 보였다. */
+  .journey-funnel { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; align-items: start; }
   .jf-stage { display: flex; flex-direction: column; gap: 6px; }
   .jf-bar {
     position: relative; height: 140px; border-radius: 10px; background: var(--subtle);
@@ -251,7 +260,8 @@
   }
   .jf-fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--tide); border-radius: 10px 10px 0 0; }
   .jf-bar:hover .jf-fill, .jf-bar:focus-visible .jf-fill { background: var(--deep-water); }
-  .jf-num { position: relative; padding: 8px 10px; font-size: 20px; font-weight: 600; color: var(--ink); }
+  /* 숫자는 칠 위에도 칠 밖에도 놓인다 — 다크 모드에서 옅은 보라 칠 위 밝은 글자가 안 보여 바탕을 깐다. */
+  .jf-num { position: relative; margin: 6px; padding: 2px 8px; border-radius: 8px; background: var(--surface); font-size: 20px; font-weight: 600; color: var(--ink); }
   .jf-num small { margin-left: 6px; font-size: 12px; font-weight: 400; color: var(--secondary-ink); }
   .jf-label { display: flex; flex-direction: column; gap: 2px; font-size: 13px; line-height: 1.4; }
   .jf-label .muted { font-size: 12px; }
