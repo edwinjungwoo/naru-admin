@@ -42,6 +42,7 @@ const KOREAN_STEP_NAMES = {
   invitee_entry_chosen: "첫 화면 '코드 받았어요'", invitee_paste_card_shown: "붙여넣기 카드 봄",
   invitee_code_pasted: "코드 붙여넣음", invitee_switched_to_inviter: "받는 화면 → 내가 초대",
   widget_nudge_viewed: "위젯 안내 노출", widget_nudge_opened: "위젯 안내 열람", widget_nudge_dismissed: "위젯 안내 닫음",
+  drawing_widget_nudge_viewed: "낙서 위젯 안내 노출", drawing_widget_nudge_opened: "낙서 위젯 안내 열람", drawing_widget_nudge_dismissed: "낙서 위젯 안내 닫음",
   widget_nudge_partner_viewed: "위젯 안내 노출 · 상대가 올린 뒤",
   partner_invite_qr_shown: "초대 QR 보여 줌", invite_accept_failed_invalid: "초대 코드 틀림·만료",
   first_week_checklist_viewed: "첫 주 체크리스트 노출", first_week_checklist_item_tapped: "첫 주 체크리스트 항목 누름",
@@ -735,6 +736,7 @@ const NUDGE_GROUPS = [
   ["초대", ["partner_invite_sent", "partner_invite_share_completed", "partner_invite_share_cancelled", "accept_invite_sheet_opened"]],
   ["초대받은 쪽", ["invitee_entry_chosen", "invitee_paste_card_shown", "invitee_code_pasted", "invitee_switched_to_inviter"]],
   ["위젯 안내", ["widget_nudge_viewed", "widget_nudge_opened", "widget_nudge_dismissed"]],
+  ["낙서 위젯 안내", ["drawing_widget_nudge_viewed", "drawing_widget_nudge_opened", "drawing_widget_nudge_dismissed"]],
 ];
 function renderNudges(rows) {
   const el = $("nudges");
